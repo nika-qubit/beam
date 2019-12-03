@@ -127,13 +127,14 @@ class PCollectionVisualizationTest(unittest.TestCase):
     # "assert_called" is new in Python 3.6.
     mocked_timeloop.assert_called()
 
-  @patch('pandas.DataFrame.sample')
+  @patch('apache_beam.runners.interactive.display.pcoll_visualization'
+         '.PCollectionVisualization._to_element_list', lambda x: [1, 2, 3])
+  @patch('pandas.DataFrame.head')
   def test_display_plain_text_when_kernel_has_no_frontend(self,
-                                                          _mocked_sample):
-    # Resets the notebook check to False.
-    ie.current_env()._is_in_notebook = False
+                                                          _mocked_head):
+    ie.new_env()  # Resets the notebook check. Should be False in unit tests.
     self.assertIsNone(pv.visualize(self._pcoll))
-    _mocked_sample.assert_called_once()
+    _mocked_head.assert_called_once()
 
 
 if __name__ == '__main__':

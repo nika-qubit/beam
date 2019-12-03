@@ -31,6 +31,8 @@ this module in your notebook or application code.
 from __future__ import absolute_import
 
 from apache_beam.runners.interactive import interactive_environment as ie
+from apache_beam.runners.interactive import pipeline_fragment as pf
+from apache_beam.runners.interactive.display.pcoll_visualization import visualize
 
 
 def watch(watchable):
@@ -80,7 +82,53 @@ def watch(watchable):
   ie.current_env().watch(watchable)
 
 
-def visualize(pcoll):
-  """Visualizes a PCollection."""
-  # TODO(BEAM-7926)
-  pass
+def show(*pcolls):
+  """Visualizes given PCollections in an interactive exploratory way if used
+  within a notebook, or prints a heading sampled data if used within an ipython
+  shell. Noop if used in a non-interactive environment.
+
+  Ad hoc builds a pipeline fragment including only transforms that are
+  necessary to produce data for given PCollections *pcolls, runs the pipeline
+  fragment to compute data for those *pcolls and then visualizes the data.
+
+  The function is always blocking. If used within a notebook, the data
+  visualized might be dynamically updated before the function returns as more
+  and more data could getting processed and emitted when the pipeline fragment
+  is being executed. If used within an ipython shell, there will be no dynamic
+  plotting but a static plotting in the end of pipeline fragment execution.
+
+  The PCollections given must belong to the same pipeline and be watched by
+  Interactive Beam (PCollections defined in __main__ are automatically watched).
+
+    For example::
+
+      p = beam.Pipeline(InteractiveRunner())
+      init = p | 'Init' >> beam.Create(range(1000))
+      square = init | 'Square' >> beam.Map(lambda x: x * x)
+      cube = init | 'Cube' >> beam.Map(lambda x: x ** 3)
+
+      # Below builds a pipeline fragment from the defined pipeline `p` that
+      # contains only applied transforms of `Init` and `Square`. Then the
+      # interactive runner runs the pipeline fragment implicitly to compute data
+      # represented by PCollection `square` and visualizes it.
+      show(square)
+
+      # This is equivalent to `show(square)` because `square` depends on `init`
+      # and `init` is included in the pipeline fragment and computed anyway.
+      show(init, square)
+
+      # Below is similar to running `p.run()`. It computes data for both
+      # PCollection `square` and PCollection `cube`, then visualizes them.
+      show(square, cube)
+  """
+  result = pf.PipelineFragment(list(pcolls)).run()
+  ie.current_env().set_pipeline_result(pcolls[0].pipeline, result)
+  # If in notebook, dynamic plotting as computation goes.
+  if ie.current_env().is_in_notebook:
+    for pcoll in pcolls:
+      visualize(pcoll, dynamic_plotting_interval=1)
+  result.wait_until_finish()
+  # If just in ipython shell, plotting once when computation is completed.
+  if ie.current_env().is_in_ipython and not ie.current_env().is_in_notebook:
+    for pcoll in pcolls:
+      visualize(pcoll)

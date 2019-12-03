@@ -181,7 +181,7 @@ class PCollectionVisualization(object):
     self._df_display_id = 'df_{}_{}'.format(self._cache_key, id(self))
 
   def display_plain_text(self):
-    """Displays a random sample of the normalized PCollection data.
+    """Displays a head sample of the normalized PCollection data.
 
     This function is used when the ipython kernel is not connected to a
     notebook frontend such as when running ipython in terminal or in unit tests.
@@ -190,7 +190,7 @@ class PCollectionVisualization(object):
     # the function.
     if _pcoll_visualization_ready:
       data = self._to_dataframe()
-      data_sample = data.sample(n=25 if len(data) > 25 else len(data))
+      data_sample = data.head(n=25 if len(data) > 25 else len(data))
       display(data_sample)
 
   def display_facets(self, updating_pv=None):
