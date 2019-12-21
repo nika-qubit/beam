@@ -23,6 +23,9 @@ For internal use only; no backwards-compatibility guarantees.
 
 from __future__ import absolute_import
 
+import sys
+import time
+
 from abc import ABCMeta
 from abc import abstractmethod
 from builtins import object
@@ -34,12 +37,21 @@ from apache_beam import coders
 from apache_beam import pvalue
 from apache_beam.portability import common_urns
 from apache_beam.portability.api import beam_runner_api_pb2
+from apache_beam.portability.api.beam_interactive_api_pb2 import TestStreamFileRecord
 from apache_beam.transforms import PTransform
 from apache_beam.transforms import core
 from apache_beam.transforms import window
+from apache_beam.transforms.timeutil import TimeDomain
+from apache_beam.transforms.userstate import on_timer
+from apache_beam.transforms.userstate import StateSpec
+from apache_beam.transforms.userstate import TimerSpec
 from apache_beam.transforms.window import TimestampedValue
+from apache_beam.utils.timestamp import MAX_TIMESTAMP
+from apache_beam.utils.timestamp import MIN_TIMESTAMP
+from apache_beam.utils.timestamp import TIME_GRANULARITY
 from apache_beam.utils import timestamp
 from apache_beam.utils.windowed_value import WindowedValue
+from google.protobuf.timestamp_pb2 import Timestamp
 
 __all__ = [
     'Event',
@@ -102,14 +114,19 @@ class ElementEvent(Event):
     self.tag = tag
 
   def __eq__(self, other):
-    return (
-        self.timestamped_values == other.timestamped_values and
-        self.tag == other.tag)
+    if not isinstance(other, ElementEvent):
+      raise TypeError
+
+    return (self.timestamped_values == other.timestamped_values and
+            self.tag == other.tag)
 
   def __hash__(self):
     return hash(self.timestamped_values)
 
   def __lt__(self, other):
+    if not isinstance(other, ElementEvent):
+      raise TypeError
+
     return self.timestamped_values < other.timestamped_values
 
   def to_runner_api(self, element_coder):
@@ -122,6 +139,9 @@ class ElementEvent(Event):
                 for tv in self.timestamped_values
             ]))
 
+  def __repr__(self):
+    return 'ElementEvent: <{}, {}>'.format([(e.value, e.timestamp) for e in self.timestamped_values], self.tag)
+
 
 class WatermarkEvent(Event):
   """Watermark-advancing test stream event."""
@@ -130,12 +150,18 @@ class WatermarkEvent(Event):
     self.tag = tag
 
   def __eq__(self, other):
+    if not isinstance(other, WatermarkEvent):
+      raise TypeError
+
     return self.new_watermark == other.new_watermark and self.tag == other.tag
 
   def __hash__(self):
     return hash(self.new_watermark)
 
   def __lt__(self, other):
+    if not isinstance(other, WatermarkEvent):
+      raise TypeError
+
     return self.new_watermark < other.new_watermark
 
   def to_runner_api(self, unused_element_coder):
@@ -144,24 +170,36 @@ class WatermarkEvent(Event):
         AdvanceWatermark(new_watermark=self.new_watermark.micros // 1000))
 
 
+  def __repr__(self):
+    return 'WatermarkEvent: <{}, {}>'.format(self.new_watermark, self.tag)
+
 class ProcessingTimeEvent(Event):
   """Processing time-advancing test stream event."""
   def __init__(self, advance_by):
     self.advance_by = timestamp.Duration.of(advance_by)
 
   def __eq__(self, other):
+    if not isinstance(other, ProcessingTimeEvent):
+      raise TypeError
+
     return self.advance_by == other.advance_by
 
   def __hash__(self):
     return hash(self.advance_by)
 
   def __lt__(self, other):
+    if not isinstance(other, ProcessingTimeEvent):
+      raise TypeError
+
     return self.advance_by < other.advance_by
 
   def to_runner_api(self, unused_element_coder):
     return beam_runner_api_pb2.TestStreamPayload.Event(
         processing_time_event=beam_runner_api_pb2.TestStreamPayload.Event.
         AdvanceProcessingTime(advance_duration=self.advance_by.micros // 1000))
+
+  def __repr__(self):
+    return 'ProcessingTimeEvent: <{}>'.format(self.advance_by)
 
 
 class TestStream(PTransform):
@@ -282,3 +320,174 @@ class TestStream(PTransform):
     return TestStream(
         coder=coder,
         events=[Event.from_runner_api(e, coder) for e in payload.events])
+
+
+class _TimingInfoReporter(PTransform):
+  def expand(self, pcoll):
+    return pvalue.PCollection.from_(pcoll)
+
+
+class _TimingInfo(object):
+  def __init__(self, event_timestamp, processing_time, watermark):
+    self._event_timestamp = event_timestamp
+    self._processing_time = processing_time
+    self._watermark = watermark
+
+  @property
+  def event_timestamp(self):
+    return self._event_timestamp
+
+  @property
+  def processing_time(self):
+    return self._processing_time
+
+  @property
+  def watermark(self):
+    return self._watermark
+
+  def __repr__(self):
+    return '({}, {}, {})'.format(self.event_timestamp,
+                                 self.processing_time,
+                                 self.watermark / 1000000)
+
+
+class _WatermarkEventGenerator(beam.DoFn):
+  # Used to return the initial timing information.
+  EXECUTE_ONCE_STATE = beam.transforms.userstate.BagStateSpec(
+      name='execute_once_state',
+      coder=beam.coders.FastPrimitivesCoder())
+  WATERMARK_TRACKER = TimerSpec('watermark_tracker', TimeDomain.REAL_TIME)
+
+  def __init__(self, sample_resolution_sec=0.1):
+    self._sample_resolution_sec = sample_resolution_sec
+
+  @on_timer(WATERMARK_TRACKER)
+  def on_watermark_tracker(
+      self,
+      timestamp=beam.DoFn.TimestampParam,
+      watermark_tracker=beam.DoFn.TimerParam(WATERMARK_TRACKER)):
+    next_sample_time = timestamp.micros / 1000000 + self._sample_resolution_sec
+    watermark_tracker.set(next_sample_time)
+
+    # Generate two events, the delta since the last sample and a place-holder
+    # WatermarkEvent. This is a placeholder because we can't otherwise add the
+    # watermark from the runner to the event.
+    yield ProcessingTimeEvent(self._sample_resolution_sec)
+    yield WatermarkEvent(MIN_TIMESTAMP)
+
+  def process(self, e,
+        timestamp=beam.DoFn.TimestampParam,
+        window=beam.DoFn.WindowParam,
+        watermark_tracker=beam.DoFn.TimerParam(WATERMARK_TRACKER),
+        execute_once_state=beam.DoFn.StateParam(EXECUTE_ONCE_STATE)):
+
+    _, (element, timing_info) = e
+
+    first_time = next(execute_once_state.read(), True)
+    if first_time:
+      # Generate the initial timing events.
+      execute_once_state.add(False)
+      now_sec = timing_info.processing_time / 1000000
+      watermark_tracker.set(now_sec + self._sample_resolution_sec)
+
+      yield ProcessingTimeEvent(timing_info.processing_time / 1000000)
+      yield WatermarkEvent(MIN_TIMESTAMP)
+    yield element
+
+
+class _TestStreamEventGenerator(beam.DoFn):
+  def start_bundle(self):
+    self.elements = []
+    self.timing_events = []
+
+  def finish_bundle(self):
+    if self.timing_events:
+      yield WindowedValue(self.timing_events, timestamp=0,
+                          windows=[beam.window.GlobalWindow()])
+
+    if self.elements:
+      yield WindowedValue([ElementEvent(self.elements)], timestamp=0,
+                          windows=[beam.window.GlobalWindow()])
+
+  def process(self, e, timestamp=beam.DoFn.TimestampParam):
+    element, timing_info = e
+    if isinstance(element, WatermarkEvent):
+      element.new_watermark = timing_info.watermark / 1000000
+      self.timing_events.append(element)
+    elif isinstance(element, ProcessingTimeEvent):
+      self.timing_events.append(element)
+    else:
+      self.elements.append(TimestampedValue(element, timestamp))
+
+
+class _TestStreamFileRecordGenerator(beam.DoFn):
+  def __init__(self, coder):
+    self._coder = coder
+
+  def start_bundle(self):
+    self.elements = []
+    self.timing_events = []
+
+  def finish_bundle(self):
+    if self.timing_events:
+      output = []
+      for e, processing_time in self.timing_events:
+        if isinstance(e, WatermarkEvent):
+          watermark = Timestamp(seconds=int(e.new_watermark))
+          processing_time = Timestamp(seconds=processing_time)
+          record = TestStreamFileRecord(watermark=watermark,
+                                        processing_time=processing_time)
+          output.append(record)
+      yield WindowedValue(output, timestamp=0,
+                          windows=[beam.window.GlobalWindow()])
+
+    if self.elements:
+      output = []
+      for tv, processing_time in self.elements:
+        element_timestamp = tv.timestamp.micros
+        processing_time = Timestamp(seconds=processing_time)
+        element = beam_runner_api_pb2.TestStreamPayload.TimestampedElement(
+                encoded_element=self._coder.encode(tv.value),
+                timestamp=element_timestamp)
+        record = TestStreamFileRecord(element=element,
+                                      processing_time=processing_time)
+        output.append(record)
+
+      yield WindowedValue(output, timestamp=0,
+                          windows=[beam.window.GlobalWindow()])
+
+  def process(self, e, timestamp=beam.DoFn.TimestampParam):
+    element, timing_info = e
+
+    if isinstance(element, WatermarkEvent):
+      element.new_watermark = timing_info.watermark / 1000000
+      self.timing_events.append((element, timing_info.processing_time))
+    elif isinstance(element, ProcessingTimeEvent):
+      self.timing_events.append((element, timing_info.processing_time))
+    else:
+      self.elements.append((TimestampedValue(element, timestamp),
+                            timing_info.processing_time))
+
+
+class ReverseTestStream(PTransform):
+  FILE_RECORD = 'file_record'
+  EVENTS = 'events'
+
+  def __init__(self, sample_resolution_sec, coder=None, output_format=None):
+    self._sample_resolution_sec = sample_resolution_sec
+    self._output_format = output_format
+    self._coder = (coder if coder is not None
+                   else beam.coders.FastPrimitivesCoder())
+
+  def expand(self, pcoll):
+    generator = (_TestStreamFileRecordGenerator(coder=self._coder)
+                 if self._output_format == ReverseTestStream.FILE_RECORD
+                 else _TestStreamEventGenerator())
+    return (pcoll
+            | beam.WindowInto(beam.window.GlobalWindows())
+            | 'initial timing' >> _TimingInfoReporter()
+            | beam.Map(lambda x: (0, x))
+            | beam.ParDo(_WatermarkEventGenerator(
+                  sample_resolution_sec=self._sample_resolution_sec))
+            | 'timing info for watermarks' >> _TimingInfoReporter()
+            | beam.ParDo(generator))

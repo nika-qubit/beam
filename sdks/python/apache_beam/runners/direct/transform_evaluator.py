@@ -60,6 +60,10 @@ from apache_beam.runners.direct.watermark_manager import WatermarkManager
 from apache_beam.testing.test_stream import ElementEvent
 from apache_beam.testing.test_stream import ProcessingTimeEvent
 from apache_beam.testing.test_stream import WatermarkEvent
+from apache_beam.testing.test_stream import _TestStream
+from apache_beam.testing.test_stream import _WatermarkController
+from apache_beam.testing.test_stream import _TimingInfoReporter
+from apache_beam.testing.test_stream import _TimingInfo
 from apache_beam.transforms import core
 from apache_beam.transforms.trigger import InMemoryUnmergedState
 from apache_beam.transforms.trigger import TimeDomain
@@ -74,6 +78,7 @@ from apache_beam.transforms.window import WindowedValue
 from apache_beam.typehints.typecheck import TypeCheckError
 from apache_beam.utils import counters
 from apache_beam.utils.timestamp import MIN_TIMESTAMP
+from apache_beam.utils.timestamp import Duration
 from apache_beam.utils.timestamp import Timestamp
 
 if TYPE_CHECKING:
@@ -111,6 +116,7 @@ class TransformEvaluatorRegistry(object):
         _TestStream: _TestStreamEvaluator,
         ProcessElements: _ProcessElementsEvaluator,
         _WatermarkController: _WatermarkControllerEvaluator,
+        _TimingInfoReporter: _TimingInfoReporterEvaluator,
     }  # type: Dict[Type[core.PTransform], Type[_TransformEvaluator]]
     self._evaluators.update(self._test_evaluators_overrides)
     self._root_bundle_providers = {
@@ -407,6 +413,7 @@ class _WatermarkControllerEvaluator(_TransformEvaluator):
   @_watermark.setter
   def _watermark(self, watermark):
     self._state.set_global_state(self.WATERMARK_TAG, watermark)
+    # print('watermark is now', watermark)
 
   def start_bundle(self):
     self.bundles = []
@@ -430,6 +437,45 @@ class _WatermarkControllerEvaluator(_TransformEvaluator):
     # to control the output watermark.
     return TransformResult(
         self, self.bundles, [], None, {None: self._watermark})
+
+
+class _TimingInfoReporterEvaluator(_TransformEvaluator):
+  """TransformEvaluator for the TestStream transform.
+
+  This evaluator's responsibility is to retrieve the next event from the
+  _TestStream and either: advance the clock, advance the _TestStream watermark,
+  or pass the event to the _WatermarkController.
+
+  The _WatermarkController is in charge of emitting the elements to the
+  downstream consumers and setting its own output watermark.
+  """
+
+  def __init__(self, evaluation_context, applied_ptransform,
+               input_committed_bundle, side_inputs):
+    assert not side_inputs
+    super(_TimingInfoReporterEvaluator, self).__init__(
+        evaluation_context, applied_ptransform, input_committed_bundle,
+        side_inputs)
+
+  def start_bundle(self):
+    main_output = list(self._outputs)[0]
+    self.bundle = self._evaluation_context.create_bundle(main_output)
+
+  def process_element(self, element):
+    watermark_manager = self._evaluation_context._watermark_manager
+    watermarks = watermark_manager.get_watermarks(self._applied_ptransform)
+    output_watermark = watermarks.output_watermark.micros
+    now = watermark_manager._clock.time()
+    if isinstance(now, Duration):
+      now = now.micros
+
+    timing_info = _TimingInfo(element.timestamp, now, output_watermark)
+
+    element.value = (element.value, timing_info)
+    self.bundle.output(element)
+
+  def finish_bundle(self):
+    return TransformResult(self, [self.bundle], [], None, {})
 
 
 class _TestStreamEvaluator(_TransformEvaluator):
@@ -783,6 +829,7 @@ class _ParDoEvaluator(_TransformEvaluator):
   def process_timer(self, timer_firing):
     if timer_firing.name not in self.user_timer_map:
       _LOGGER.warning('Unknown timer fired: %s', timer_firing)
+    # print('timer fired', timer_firing)
     timer_spec = self.user_timer_map[timer_firing.name]
     self.runner.process_user_timer(
         timer_spec,
@@ -995,6 +1042,7 @@ class _StreamingGroupAlsoByWindowEvaluator(_TransformEvaluator):
     self.key_coder = coders.registry.get_coder(key_type_hint)
 
   def process_element(self, element):
+    # print('process element start')
     kwi = element.value
     assert isinstance(kwi, KeyedWorkItem), kwi
     encoded_k, timer_firings, vs = (
@@ -1020,6 +1068,7 @@ class _StreamingGroupAlsoByWindowEvaluator(_TransformEvaluator):
         self.gabw_items.append(wvalue.with_value((k, wvalue.value)))
 
     self.keyed_holds[encoded_k] = state.get_earliest_hold()
+    # print('here')
 
   def finish_bundle(self):
     bundles = []

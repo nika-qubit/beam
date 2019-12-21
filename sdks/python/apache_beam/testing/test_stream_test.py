@@ -21,14 +21,18 @@
 
 from __future__ import absolute_import
 
+import time
 import unittest
 
 import apache_beam as beam
+from apache_beam.portability.api.beam_runner_api_pb2 import TestStreamPayload
+from apache_beam.portability.api.beam_interactive_api_pb2 import TestStreamFileRecord
 from apache_beam.options.pipeline_options import PipelineOptions
 from apache_beam.options.pipeline_options import StandardOptions
 from apache_beam.testing.test_pipeline import TestPipeline
 from apache_beam.testing.test_stream import ElementEvent
 from apache_beam.testing.test_stream import ProcessingTimeEvent
+from apache_beam.testing.test_stream import ReverseTestStream
 from apache_beam.testing.test_stream import TestStream
 from apache_beam.testing.test_stream import WatermarkEvent
 from apache_beam.testing.util import assert_that
@@ -41,6 +45,7 @@ from apache_beam.transforms.window import TimestampedValue
 from apache_beam.utils import timestamp
 from apache_beam.utils.timestamp import Timestamp
 from apache_beam.utils.windowed_value import WindowedValue
+from google.protobuf.timestamp_pb2 import Timestamp
 
 
 class TestStreamTest(unittest.TestCase):
@@ -525,6 +530,198 @@ class TestStreamTest(unittest.TestCase):
         records,
         equal_to_per_window(expected_window_to_elements),
         label='assert per window')
+
+    p.run()
+
+
+class ReverseTestStreamTest(unittest.TestCase):
+  def test_basic_execution(self):
+    test_stream = (TestStream()
+                   .advance_watermark_to(0)
+                   .advance_processing_time(5)
+                   .add_elements(['a', 'b', 'c'])
+                   .advance_watermark_to(2)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(4)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(6)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(8)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(10)
+                   .advance_processing_time(1)
+                   .add_elements([TimestampedValue('1', 15),
+                                  TimestampedValue('2', 15),
+                                  TimestampedValue('3', 15)]))
+
+    options = StandardOptions(streaming=True)
+    p = TestPipeline(options=options)
+
+    def printer(e):
+      print(e)
+      return e
+
+    records = (p
+               | test_stream
+               | ReverseTestStream(sample_resolution_sec=1)
+               | beam.Map(printer)
+               )
+
+    assert_that(records, equal_to_per_window({
+        beam.window.GlobalWindow(): [
+            [ProcessingTimeEvent(5), WatermarkEvent(0)],
+            [ElementEvent([TimestampedValue('a', 0),
+                           TimestampedValue('b', 0),
+                           TimestampedValue('c', 0)])],
+            [ProcessingTimeEvent(1), WatermarkEvent(2)],
+            [ProcessingTimeEvent(1), WatermarkEvent(4)],
+            [ProcessingTimeEvent(1), WatermarkEvent(6)],
+            [ProcessingTimeEvent(1), WatermarkEvent(8)],
+            [ProcessingTimeEvent(1), WatermarkEvent(10)],
+            [ElementEvent([TimestampedValue('1', 15),
+                           TimestampedValue('2', 15),
+                           TimestampedValue('3', 15)])],
+        ],
+    }))
+
+    p.run()
+
+  def test_windowing(self):
+    test_stream = (TestStream()
+                   .advance_watermark_to(0)
+                   .add_elements(['a', 'b', 'c'])
+                   .advance_processing_time(1)
+                   .advance_processing_time(1)
+                   .advance_processing_time(1)
+                   .advance_processing_time(1)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(5)
+                   .add_elements(['1', '2', '3'])
+                   .advance_processing_time(1)
+                   .advance_watermark_to(6)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(7)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(8)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(9)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(10)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(11)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(12)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(13)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(14)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(15)
+                   .advance_processing_time(1)
+                   )
+
+    options = StandardOptions(streaming=True)
+    p = TestPipeline(options=options)
+
+    def printer(e):
+      print(e)
+      return e
+
+    records = (p
+               | test_stream
+               | 'letter windows' >> beam.WindowInto(
+                   FixedWindows(5),
+                   accumulation_mode=trigger.AccumulationMode.DISCARDING)
+               | 'letter with key' >> beam.Map(lambda x: ('k', x))
+               | 'letter gbk' >> beam.GroupByKey()
+               | ReverseTestStream(sample_resolution_sec=1)
+               | beam.Map(printer)
+               )
+
+    assert_that(records, equal_to_per_window({
+        beam.window.GlobalWindow(): [
+            [ProcessingTimeEvent(5), WatermarkEvent(4.999998)],
+            [ElementEvent([TimestampedValue(('k', ['a', 'b', 'c']),
+                                            4.999999)])],
+            [ProcessingTimeEvent(1), WatermarkEvent(5)],
+            [ProcessingTimeEvent(1), WatermarkEvent(6)],
+            [ProcessingTimeEvent(1), WatermarkEvent(7)],
+            [ProcessingTimeEvent(1), WatermarkEvent(8)],
+            [ProcessingTimeEvent(1), WatermarkEvent(9)],
+            [ElementEvent([TimestampedValue(('k', ['1', '2', '3']),
+                                            9.999999)])],
+            [ProcessingTimeEvent(1), WatermarkEvent(10)],
+            [ProcessingTimeEvent(1), WatermarkEvent(11)],
+            [ProcessingTimeEvent(1), WatermarkEvent(12)],
+            [ProcessingTimeEvent(1), WatermarkEvent(13)],
+            [ProcessingTimeEvent(1), WatermarkEvent(14)],
+            [ProcessingTimeEvent(1), WatermarkEvent(15)],
+        ],
+    }))
+
+    p.run()
+
+  def test_basic_execution_in_records_format(self):
+    test_stream = (TestStream()
+                   .advance_watermark_to(0)
+                   .advance_processing_time(5)
+                   .add_elements(['a', 'b', 'c'])
+                   .advance_watermark_to(2)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(4)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(6)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(8)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(10)
+                   .advance_processing_time(1)
+                   .add_elements([TimestampedValue('1', 15),
+                                  TimestampedValue('2', 15),
+                                  TimestampedValue('3', 15)]))
+
+    options = StandardOptions(streaming=True)
+    p = TestPipeline(options=options)
+
+    def printer(e):
+      print(e)
+      return e
+
+    coder = beam.coders.FastPrimitivesCoder()
+    records = (p
+               | test_stream
+               | ReverseTestStream(sample_resolution_sec=1,
+                                   coder=coder,
+                                   output_format=ReverseTestStream.FILE_RECORD)
+               | beam.Map(printer)
+               )
+
+    assert_that(records, equal_to_per_window({
+        beam.window.GlobalWindow(): [
+            [apache_beam.portable.aTestStreamFileRecord(
+                watermark=Timestamp(seconds=0),
+                processing_time=Timestamp(seconds=5))],
+            # [TestStreamFileRecord(
+            #     element=TestStreamPayload.TimestampedElement(
+            #         encoded_element=coder.encode('a'),
+            #         timestamp=0),
+            #     processing_time=Timestamp(seconds=5))
+            # ],
+
+            # [ProcessingTimeEvent(5), WatermarkEvent(0)],
+            # [ElementEvent([TimestampedValue('a', 0),
+            #                TimestampedValue('b', 0),
+            #                TimestampedValue('c', 0)])],
+            # [ProcessingTimeEvent(1), WatermarkEvent(2)],
+            # [ProcessingTimeEvent(1), WatermarkEvent(4)],
+            # [ProcessingTimeEvent(1), WatermarkEvent(6)],
+            # [ProcessingTimeEvent(1), WatermarkEvent(8)],
+            # [ProcessingTimeEvent(1), WatermarkEvent(10)],
+            # [ElementEvent([TimestampedValue('1', 15),
+            #                TimestampedValue('2', 15),
+            #                TimestampedValue('3', 15)])],
+        ],
+    }))
 
     p.run()
 
