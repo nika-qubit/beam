@@ -19,16 +19,76 @@
 
 from __future__ import absolute_import
 
+import itertools
+
+import apache_beam as beam
 from apache_beam.portability.api.beam_runner_api_pb2 import TestStreamPayload
+from apache_beam.runners.interactive.cache_manager import CacheManager
 from apache_beam.utils import timestamp
 from apache_beam.utils.timestamp import Timestamp
 
 
-class StreamingCache(object):
+class StreamingCacheReceiver(beam.transforms.PTransform):
+  """Marks a PCollection to be read from cache.
+
+  This class is used in the PipelineInstrument to mark that an unbounded
+  Pcollection should be read from cache. This is because the TestStream needs
+  to know all the PCollections before being created.
+  """
+  def expand(self, pbegin):
+    assert isinstance(pbegin, beam.pvalue.PBegin)
+    self.pipeline = pbegin.pipeline
+
+    return beam.pvalue.PCollection(self.pipeline, is_bounded=False)
+
+  def get_windowing(self, unused_inputs):
+    return beam.Windowing(beam.window.GlobalWindows())
+
+
+class StreamingCache(CacheManager):
   """Abstraction that holds the logic for reading and writing to cache.
   """
-  def __init__(self, readers):
-    self._readers = readers
+  def __init__(self, underlying_cache_manager):
+    self._cache_manager = underlying_cache_manager
+
+  def exists(self, *labels):
+    return self._cache_manager.exists(*labels)
+
+  def _latest_version(self, *labels):
+    return self._cache_manager._latest_version(*labels)
+
+  def read(self, *labels):
+    if not self.exists(*labels):
+      return itertools.chain([]), -1
+
+    reader, version = self._cache_manager.read(*labels)
+    header = next(reader)
+    return StreamingCache.Reader([header], [reader]).read(), version
+
+  def read_multiple(self, labels):
+    readers = [self._cache_manager.read(l)[0] for l in labels]
+    headers = [next(r) for r in readers]
+    return StreamingCache.Reader(headers, readers).read()
+
+  def write(self, values, *labels):
+    # TODO(BEAM-8335): Modify write to correctly format value to proto.
+    return self._cache_manager.write(values, *labels)
+
+  def source(self, *labels):
+    return StreamingCacheReceiver()
+
+  def sink(self, *labels):
+    # TODO(BEAM-8335): Create a StreamingCache write to cache transform.
+    return self._cache_manager.write_transform(*labels)
+
+  def save_pcoder(self, pcoder, *labels):
+    self._cache_manager.save_pcoder(pcoder, *labels)
+
+  def load_pcoder(self, *labels):
+    return self._cache_manager.load_pcoder(*labels)
+
+  def cleanup(self):
+    self._cache_manager.cleanup()
 
   class Reader(object):
     """Abstraction that reads from PCollection readers.
@@ -39,7 +99,7 @@ class StreamingCache(object):
     This class is also responsible for holding the state of the clock, injecting
     clock advancement events, and watermark advancement events.
     """
-    def __init__(self, readers):
+    def __init__(self, headers, readers):
       # This timestamp is used as the monotonic clock to order events in the
       # replay.
       self._monotonic_clock = timestamp.Timestamp.of(0)
@@ -50,8 +110,8 @@ class StreamingCache(object):
       # The file headers that are metadata for that particular PCollection.
       # The header allows for metadata about an entire stream, so that the data
       # isn't copied per record.
-      self._headers = {r.header().tag: r.header() for r in readers}
-      self._readers = {r.header().tag: r.read() for r in readers}
+      self._headers = {header.tag : header for header in headers}
+      self._readers = {h.tag : r for (h, r) in zip(headers, readers)}
 
       # The watermarks per tag. Useful for introspection in the stream.
       self._watermarks = {tag: timestamp.MIN_TIMESTAMP for tag in self._headers}
@@ -171,6 +231,3 @@ class StreamingCache(object):
           watermark_event=TestStreamPayload.Event.AdvanceWatermark(
               new_watermark=self._watermarks[tag].micros, tag=tag))
       return e
-
-  def reader(self):
-    return StreamingCache.Reader(self._readers)
