@@ -158,10 +158,11 @@ def show(*pcolls):
 
   # Attempt to run background caching job since we have the reference to the
   # user-defined pipeline.
-  bcj.attempt_to_run_background_caching_job(runner, user_pipeline)
+  bcj.attempt_to_run_background_caching_job(runner, user_pipeline,
+                                            user_pipeline.options)
 
   # Build a pipeline fragment for the PCollections and run it.
-  result = pf.PipelineFragment(list(pcolls)).run()
+  result = pf.PipelineFragment(list(pcolls), user_pipeline.options).run()
   ie.current_env().set_pipeline_result(
       user_pipeline,
       result,
