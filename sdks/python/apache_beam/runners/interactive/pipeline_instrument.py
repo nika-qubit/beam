@@ -309,6 +309,7 @@ class PipelineInstrument(object):
       self._pipeline
     """
     cacheable_inputs = set()
+    unbounded_source_pcolls = set()
 
     class InstrumentVisitor(PipelineVisitor):
       """Visitor utilizes cache to instrument the pipeline."""
@@ -319,13 +320,17 @@ class PipelineInstrument(object):
         self.visit_transform(transform_node)
 
       def visit_transform(self, transform_node):
+        if isinstance(transform_node.transform, REPLACEABLE_UNBOUNDED_SOURCES):
+          unbounded_source_pcolls.update(transform_node.outputs.values())
         cacheable_inputs.update(self._pin._cacheable_inputs(transform_node))
 
     v = InstrumentVisitor(self)
     self._pipeline.visit(v)
+
     # Create ReadCache transforms.
     for cacheable_input in cacheable_inputs:
-      self._read_cache(self._pipeline, cacheable_input)
+      self._read_cache(self._pipeline, cacheable_input,
+                       cacheable_input in unbounded_source_pcolls)
     # Replace/wire inputs w/ cached PCollections from ReadCache transforms.
     self._replace_with_cached_inputs(self._pipeline)
     # Write cache for all cacheables.
@@ -399,7 +404,7 @@ class PipelineInstrument(object):
       label = '{}{}'.format(WRITE_CACHE, key)
       _ = pcoll | label >> cache.WriteCache(self._cache_manager, key)
 
-  def _read_cache(self, pipeline, pcoll):
+  def _read_cache(self, pipeline, pcoll, is_unbounded_source_output):
     """Reads a cached pvalue.
 
     A noop will cause the pipeline to execute the transform as
@@ -415,9 +420,11 @@ class PipelineInstrument(object):
     key = self.cache_key(pcoll)
     # Can only read from cache when the cache with expected key exists and its
     # computation has been completed.
-    if (self._cache_manager.exists('full', key) and
-        (self._runner_pcoll_to_user_pcoll[pcoll] in
-         ie.current_env().computed_pcollections)):
+
+    is_cached = self._cache_manager.exists('full', key)
+    is_computed = (self._runner_pcoll_to_user_pcoll[pcoll] in
+                   ie.current_env().computed_pcollections)
+    if (is_cached and (is_computed or is_unbounded_source_output)):
       if key not in self._cached_pcoll_read:
         # Mutates the pipeline with cache read transform attached
         # to root of the pipeline.

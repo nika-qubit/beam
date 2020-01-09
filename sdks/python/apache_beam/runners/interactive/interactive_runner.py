@@ -180,11 +180,6 @@ class InteractiveRunner(runners.PipelineRunner):
       ie.current_env().mark_pcollection_computed(
           pipeline_instrument.runner_pcoll_to_user_pcoll.values())
 
-    if main_job_result.state is beam.runners.runner.PipelineState.DONE:
-      # pylint: disable=dict-values-not-iterating
-      ie.current_env().mark_pcollection_computed(
-          pipeline_instrument.runner_pcoll_to_user_pcoll.values())
-
     return main_job_result
 
 
@@ -211,7 +206,7 @@ class PipelineResult(beam.runners.runner.PipelineResult):
     key = self._pipeline_instrument.cache_key(pcoll)
     if ie.current_env().cache_manager().exists('full', key):
       pcoll_list, _ = ie.current_env().cache_manager().read('full', key)
-      return pcoll_list
+      return list(pcoll_list)
     else:
       raise ValueError('PCollection not available, please run the pipeline.')
 

@@ -346,7 +346,7 @@ class PipelineInstrumentTest(unittest.TestCase):
     second_pcoll_cache_key = 'second_pcoll_' + str(
         id(second_pcoll)) + '_' + str(id(second_pcoll.producer))
     self._mock_write_cache(second_pcoll, second_pcoll_cache_key)
-    instr.pin(p_copy)
+    instr.build_pipeline_instrument(p_copy)
 
     # Add the caching transforms.
     key = '_ReadCache_' + init_pcoll_cache_key
