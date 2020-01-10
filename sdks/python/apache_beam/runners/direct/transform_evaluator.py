@@ -60,8 +60,6 @@ from apache_beam.runners.direct.watermark_manager import WatermarkManager
 from apache_beam.testing.test_stream import ElementEvent
 from apache_beam.testing.test_stream import ProcessingTimeEvent
 from apache_beam.testing.test_stream import WatermarkEvent
-from apache_beam.testing.test_stream import _TestStream
-from apache_beam.testing.test_stream import _WatermarkController
 from apache_beam.testing.test_stream import _TimingInfoReporter
 from apache_beam.testing.test_stream import _TimingInfo
 from apache_beam.transforms import core
@@ -78,7 +76,6 @@ from apache_beam.transforms.window import WindowedValue
 from apache_beam.typehints.typecheck import TypeCheckError
 from apache_beam.utils import counters
 from apache_beam.utils.timestamp import MIN_TIMESTAMP
-from apache_beam.utils.timestamp import Duration
 from apache_beam.utils.timestamp import Timestamp
 
 if TYPE_CHECKING:
@@ -464,11 +461,9 @@ class _TimingInfoReporterEvaluator(_TransformEvaluator):
   def process_element(self, element):
     watermark_manager = self._evaluation_context._watermark_manager
     watermarks = watermark_manager.get_watermarks(self._applied_ptransform)
-    output_watermark = watermarks.output_watermark.micros
-    now = watermark_manager._clock.time()
-    if isinstance(now, Duration):
-      now = now.micros
 
+    output_watermark = watermarks.output_watermark
+    now = Timestamp(seconds=watermark_manager._clock.time())
     timing_info = _TimingInfo(element.timestamp, now, output_watermark)
 
     element.value = (element.value, timing_info)

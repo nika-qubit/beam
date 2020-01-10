@@ -21,11 +21,11 @@
 
 from __future__ import absolute_import
 
-import time
 import unittest
 
 import apache_beam as beam
 from apache_beam.portability.api.beam_runner_api_pb2 import TestStreamPayload
+from apache_beam.portability.api.beam_interactive_api_pb2 import TestStreamFileHeader
 from apache_beam.portability.api.beam_interactive_api_pb2 import TestStreamFileRecord
 from apache_beam.options.pipeline_options import PipelineOptions
 from apache_beam.options.pipeline_options import StandardOptions
@@ -45,7 +45,6 @@ from apache_beam.transforms.window import TimestampedValue
 from apache_beam.utils import timestamp
 from apache_beam.utils.timestamp import Timestamp
 from apache_beam.utils.windowed_value import WindowedValue
-from google.protobuf.timestamp_pb2 import Timestamp
 
 
 class TestStreamTest(unittest.TestCase):
@@ -557,14 +556,9 @@ class ReverseTestStreamTest(unittest.TestCase):
     options = StandardOptions(streaming=True)
     p = TestPipeline(options=options)
 
-    def printer(e):
-      print(e)
-      return e
-
     records = (p
                | test_stream
                | ReverseTestStream(sample_resolution_sec=1)
-               | beam.Map(printer)
                )
 
     assert_that(records, equal_to_per_window({
@@ -623,10 +617,6 @@ class ReverseTestStreamTest(unittest.TestCase):
     options = StandardOptions(streaming=True)
     p = TestPipeline(options=options)
 
-    def printer(e):
-      print(e)
-      return e
-
     records = (p
                | test_stream
                | 'letter windows' >> beam.WindowInto(
@@ -635,7 +625,6 @@ class ReverseTestStreamTest(unittest.TestCase):
                | 'letter with key' >> beam.Map(lambda x: ('k', x))
                | 'letter gbk' >> beam.GroupByKey()
                | ReverseTestStream(sample_resolution_sec=1)
-               | beam.Map(printer)
                )
 
     assert_that(records, equal_to_per_window({
@@ -683,43 +672,67 @@ class ReverseTestStreamTest(unittest.TestCase):
     options = StandardOptions(streaming=True)
     p = TestPipeline(options=options)
 
-    def printer(e):
-      print(e)
-      return e
-
     coder = beam.coders.FastPrimitivesCoder()
     records = (p
                | test_stream
                | ReverseTestStream(sample_resolution_sec=1,
                                    coder=coder,
                                    output_format=ReverseTestStream.FILE_RECORD)
-               | beam.Map(printer)
+               | 'stringify' >> beam.Map(str)
                )
 
     assert_that(records, equal_to_per_window({
         beam.window.GlobalWindow(): [
-            [apache_beam.portable.aTestStreamFileRecord(
-                watermark=Timestamp(seconds=0),
-                processing_time=Timestamp(seconds=5))],
-            # [TestStreamFileRecord(
-            #     element=TestStreamPayload.TimestampedElement(
-            #         encoded_element=coder.encode('a'),
-            #         timestamp=0),
-            #     processing_time=Timestamp(seconds=5))
-            # ],
-
-            # [ProcessingTimeEvent(5), WatermarkEvent(0)],
-            # [ElementEvent([TimestampedValue('a', 0),
-            #                TimestampedValue('b', 0),
-            #                TimestampedValue('c', 0)])],
-            # [ProcessingTimeEvent(1), WatermarkEvent(2)],
-            # [ProcessingTimeEvent(1), WatermarkEvent(4)],
-            # [ProcessingTimeEvent(1), WatermarkEvent(6)],
-            # [ProcessingTimeEvent(1), WatermarkEvent(8)],
-            # [ProcessingTimeEvent(1), WatermarkEvent(10)],
-            # [ElementEvent([TimestampedValue('1', 15),
-            #                TimestampedValue('2', 15),
-            #                TimestampedValue('3', 15)])],
+            str(TestStreamFileHeader()),
+            str(TestStreamFileRecord(
+                watermark_event=TestStreamPayload.Event.AdvanceWatermark(
+                    new_watermark=0),
+                processing_time=Timestamp(seconds=5).to_proto())),
+            str(TestStreamFileRecord(
+                element_event=TestStreamPayload.Event.AddElements(
+                    elements=[
+                        TestStreamPayload.TimestampedElement(
+                            encoded_element=coder.encode('a'), timestamp=0),
+                        TestStreamPayload.TimestampedElement(
+                            encoded_element=coder.encode('b'), timestamp=0),
+                        TestStreamPayload.TimestampedElement(
+                            encoded_element=coder.encode('c'), timestamp=0),
+                    ]),
+                processing_time=Timestamp(seconds=5).to_proto())),
+            str(TestStreamFileRecord(
+                watermark_event=TestStreamPayload.Event.AdvanceWatermark(
+                    new_watermark=2),
+                processing_time=Timestamp(seconds=6).to_proto())),
+            str(TestStreamFileRecord(
+                watermark_event=TestStreamPayload.Event.AdvanceWatermark(
+                    new_watermark=4),
+                processing_time=Timestamp(seconds=7).to_proto())),
+            str(TestStreamFileRecord(
+                watermark_event=TestStreamPayload.Event.AdvanceWatermark(
+                    new_watermark=6),
+                processing_time=Timestamp(seconds=8).to_proto())),
+            str(TestStreamFileRecord(
+                watermark_event=TestStreamPayload.Event.AdvanceWatermark(
+                    new_watermark=8),
+                processing_time=Timestamp(seconds=9).to_proto())),
+            str(TestStreamFileRecord(
+                watermark_event=TestStreamPayload.Event.AdvanceWatermark(
+                    new_watermark=10),
+                processing_time=Timestamp(seconds=10).to_proto())),
+            str(TestStreamFileRecord(
+                element_event=TestStreamPayload.Event.AddElements(
+                    elements=[
+                        TestStreamPayload.TimestampedElement(
+                            encoded_element=coder.encode('1'),
+                            timestamp=15000000),
+                        TestStreamPayload.TimestampedElement(
+                            encoded_element=coder.encode('2'),
+                            timestamp=15000000),
+                        TestStreamPayload.TimestampedElement(
+                            encoded_element=coder.encode('3'),
+                            timestamp=15000000),
+                    ]),
+                processing_time=Timestamp(seconds=10).to_proto())),
         ],
     }))
 
