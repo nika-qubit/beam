@@ -74,18 +74,20 @@ class FileRecordsBuilder(object):
     self._coder = coders.FastPrimitivesCoder()
 
   def add_element(self, element, event_time, processing_time):
-    element_payload = TestStreamPayload.TimestampedElement(
-        encoded_element=self._coder.encode(element),
-        timestamp=Timestamp.of(event_time).micros)
+    element_payload = TestStreamPayload.Event.AddElements(
+        elements=[TestStreamPayload.TimestampedElement(
+            encoded_element=self._coder.encode(element),
+            timestamp=Timestamp.of(event_time).micros)])
     record = TestStreamFileRecord(
-        element=element_payload,
+        element_event=element_payload,
         processing_time=Timestamp.of(processing_time).to_proto())
     self._records.append(record)
     return self
 
   def advance_watermark(self, watermark, processing_time):
     record = TestStreamFileRecord(
-        watermark=Timestamp.of(watermark).to_proto(),
+        watermark_event=TestStreamPayload.Event.AdvanceWatermark(
+            new_watermark=Timestamp.of(watermark).micros),
         processing_time=Timestamp.of(processing_time).to_proto())
     self._records.append(record)
     return self
@@ -124,7 +126,6 @@ class StreamingCacheTest(unittest.TestCase):
     reader, _ = cache.read(CACHED_PCOLLECTION_KEY)
     coder = coders.FastPrimitivesCoder()
     events = list(reader)
-
     expected = [
         TestStreamPayload.Event(
             element_event=TestStreamPayload.Event.AddElements(

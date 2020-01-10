@@ -22,27 +22,25 @@ from __future__ import absolute_import
 import itertools
 
 import apache_beam as beam
+from apache_beam.portability.api.beam_interactive_api_pb2 import TestStreamFileHeader
+from apache_beam.portability.api.beam_interactive_api_pb2 import TestStreamFileRecord
 from apache_beam.portability.api.beam_runner_api_pb2 import TestStreamPayload
 from apache_beam.runners.interactive.cache_manager import CacheManager
 from apache_beam.utils import timestamp
 from apache_beam.utils.timestamp import Timestamp
 
 
-class StreamingCacheReceiver(beam.transforms.PTransform):
-  """Marks a PCollection to be read from cache.
+class StreamingCacheSink(beam.PTransform):
+  def __init__(self, underlying_sink):
+    self._underlying_sink = underlying_sink
 
-  This class is used in the PipelineInstrument to mark that an unbounded
-  Pcollection should be read from cache. This is because the TestStream needs
-  to know all the PCollections before being created.
-  """
-  def expand(self, pbegin):
-    assert isinstance(pbegin, beam.pvalue.PBegin)
-    self.pipeline = pbegin.pipeline
+  def expand(self, pcoll):
+    from apache_beam.testing.test_stream import ReverseTestStream
 
-    return beam.pvalue.PCollection(self.pipeline, is_bounded=False)
-
-  def get_windowing(self, unused_inputs):
-    return beam.Windowing(beam.window.GlobalWindows())
+    return (pcoll
+            | ReverseTestStream(sample_resolution_sec=0.1,
+                                output_format=ReverseTestStream.SERIALIZED)
+            | self._underlying_sink)
 
 
 class StreamingCache(CacheManager):
@@ -62,24 +60,27 @@ class StreamingCache(CacheManager):
       return itertools.chain([]), -1
 
     reader, version = self._cache_manager.read(*labels)
-    header = next(reader)
+    header_serialized = next(reader)
+    header = TestStreamFileHeader()
+    header.ParseFromString(header_serialized)
     return StreamingCache.Reader([header], [reader]).read(), version
 
   def read_multiple(self, labels):
     readers = [self._cache_manager.read(l)[0] for l in labels]
-    headers = [next(r) for r in readers]
+    headers = [TestStreamFileHeader() for r in readers]
+    for h, r in zip(headers, readers):
+      h.ParseFromString(next(r))
     return StreamingCache.Reader(headers, readers).read()
 
   def write(self, values, *labels):
-    # TODO(BEAM-8335): Modify write to correctly format value to proto.
-    return self._cache_manager.write(values, *labels)
+    to_write = [v.SerializeToString() for v in values]
+    return self._cache_manager.write(to_write, *labels)
 
   def source(self, *labels):
-    return StreamingCacheReceiver()
+    return beam.Impulse()
 
   def sink(self, *labels):
-    # TODO(BEAM-8335): Create a StreamingCache write to cache transform.
-    return self._cache_manager.write_transform(*labels)
+    return StreamingCacheSink(self._cache_manager.sink(*labels))
 
   def save_pcoder(self, pcoder, *labels):
     self._cache_manager.save_pcoder(pcoder, *labels)
@@ -139,7 +140,9 @@ class StreamingCache(CacheManager):
         if self._stream_times[tag] >= target_timestamp:
           continue
         try:
-          record = next(r)
+          record_serialized = next(r)
+          record = TestStreamFileRecord()
+          record.ParseFromString(record_serialized)
           records.append((tag, record))
           self._stream_times[tag] = Timestamp.from_proto(record.processing_time)
         except StopIteration:
@@ -199,19 +202,16 @@ class StreamingCache(CacheManager):
             yield self._advance_processing_time(curr_timestamp)
 
           # Then, send either a new element or watermark.
-          if r.HasField('element'):
-            yield self._add_element(r.element, tag)
-          elif r.HasField('watermark'):
-            yield self._advance_watermark(r.watermark, tag)
+          if r.HasField('element_event'):
+            r.element_event.tag = tag
+            yield TestStreamPayload.Event(element_event=r.element_event)
+          elif r.HasField('watermark_event'):
+            self._watermarks[tag] = timestamp.Timestamp(
+                r.watermark_event.new_watermark)
+            r.watermark_event.tag = tag
+            yield TestStreamPayload.Event(watermark_event=r.watermark_event)
         unsent_events = events_to_send
         target_timestamp = self._min_timestamp_of(unsent_events)
-
-    def _add_element(self, element, tag):
-      """Constructs an AddElement event for the specified element and tag.
-      """
-      return TestStreamPayload.Event(
-          element_event=TestStreamPayload.Event.AddElements(
-              elements=[element], tag=tag))
 
     def _advance_processing_time(self, new_timestamp):
       """Advances the internal clock and returns an AdvanceProcessingTime event.
@@ -221,13 +221,4 @@ class StreamingCache(CacheManager):
           processing_time_event=TestStreamPayload.Event.AdvanceProcessingTime(
               advance_duration=advancy_by))
       self._monotonic_clock = new_timestamp
-      return e
-
-    def _advance_watermark(self, watermark, tag):
-      """Advances the watermark for tag and returns AdvanceWatermark event.
-      """
-      self._watermarks[tag] = Timestamp.from_proto(watermark)
-      e = TestStreamPayload.Event(
-          watermark_event=TestStreamPayload.Event.AdvanceWatermark(
-              new_watermark=self._watermarks[tag].micros, tag=tag))
       return e
