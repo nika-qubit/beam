@@ -87,9 +87,19 @@ class InteractiveEnvironment(object):
     self._main_pipeline_results = {}
     # Holds results of background caching jobs as
     # Dict[Pipeline, PipelineResult]. Each key is a pipeline instance defined by
-    # the end user. The InteractiveRunner is responsible for populating this
-    # dictionary implicitly when a background caching jobs is started.
+    # the end user. The InteractiveRunner or its enclosing scope is responsible
+    # for populating this dictionary implicitly when a background caching jobs
+    # is started.
     self._background_caching_pipeline_results = {}
+    # Holds TestStreamServiceControllers that controls gRPC servers serving
+    # events as test stream of TestStreamPayload.Event.
+    # Dict[Pipeline, TestStreamServiceController]. Each key is a pipeline
+    # instance defined by the end user. The InteractiveRunner or its enclosing
+    # scope is responsible for populating this dictionary implicitly when a new
+    # controller is created to start a new gRPC server. The server stays alive
+    # until a new background caching job is started thus invalidating everything
+    # the gRPC server serves.
+    self._test_stream_service_controllers = {}
     self._cached_source_signature = {}
     self._tracked_user_pipelines = set()
     # Tracks the computation completeness of PCollections. PCollections tracked
@@ -198,6 +208,11 @@ class InteractiveEnvironment(object):
     if self._cache_manager is cache_manager:
       # NOOP if setting to the same cache_manager.
       return
+    # Wrapping a cache manager does not trigger clean up.
+    if (hasattr(cache_manager, '_cache_manager')
+        and self._cache_manager is cache_manager._cache_manager):
+      self._cache_manager = cache_manager
+      return
     if self._cache_manager:
       # Invoke cleanup routine when a new cache_manager is forcefully set and
       # current cache_manager is not None.
@@ -239,6 +254,27 @@ class InteractiveEnvironment(object):
     if is_main_job:
       return self._main_pipeline_results.get(pipeline, None)
     return self._background_caching_pipeline_results.get(pipeline, None)
+
+  def set_test_stream_service_controller(self, pipeline, controller):
+    """Sets the test stream service controller that has started a gRPC server
+    serving the test stream for any job started from the given user-defined
+    pipeline.
+    """
+    self._test_stream_service_controllers[pipeline] = controller
+
+  def get_test_stream_service_controller(self, pipeline):
+    """Gets the test stream service controller that has started a gRPC server
+    serving the test stream for any job started from the given user-defined
+    pipeline.
+    """
+    return self._test_stream_service_controllers.get(pipeline, None)
+
+  def evict_test_stream_service_controller(self, pipeline):
+    """Evicts and pops the test stream service controller that has started a
+    gRPC server serving the test stream for any job started from the given
+    user-defined pipeline.
+    """
+    return self._test_stream_service_controllers.pop(pipeline, None)
 
   def is_terminated(self, pipeline, is_main_job=True):
     """Queries if the most recent job (by executing the given pipeline) state

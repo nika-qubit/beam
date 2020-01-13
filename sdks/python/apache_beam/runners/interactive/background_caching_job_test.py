@@ -29,7 +29,10 @@ from apache_beam.runners.interactive import background_caching_job as bcj
 from apache_beam.runners.interactive import interactive_beam as ib
 from apache_beam.runners.interactive import interactive_environment as ie
 from apache_beam.runners.interactive import interactive_runner
+from apache_beam.runners.interactive.caching.streaming_cache import StreamingCache
 from apache_beam.runners.interactive.testing.mock_ipython import mock_get_ipython
+from apache_beam.runners.interactive.testing.test_cache_manager import FileRecordsBuilder
+from apache_beam.runners.interactive.testing.test_cache_manager import InMemoryCache
 from apache_beam.testing.test_stream import TestStream
 from apache_beam.transforms.window import TimestampedValue
 
@@ -42,7 +45,7 @@ except ImportError:
 
 _FOO_PUBSUB_SUB = 'projects/test-project/subscriptions/foo'
 _BAR_PUBSUB_SUB = 'projects/test-project/subscriptions/bar'
-
+_TEST_CACHE_KEY = 'test'
 
 def _build_a_test_stream_pipeline():
   test_stream = (
@@ -65,6 +68,20 @@ def _build_an_empty_stream_pipeline():
   ib.watch({'pipeline': p})
   return p
 
+def _setup_test_streaming_cache():
+  cache_manager = StreamingCache(InMemoryCache())
+  ie.current_env().set_cache_manager(cache_manager)
+  builder = FileRecordsBuilder(tag=_TEST_CACHE_KEY)
+  (builder
+   .advance_watermark(watermark=0,
+                      processing_time=0)
+   .add_element(element='a',
+                event_time=1,
+                processing_time=5)
+   .advance_watermark(watermark=100,
+                      processing_time=10))
+  cache_manager.write(builder.build(), _TEST_CACHE_KEY)
+
 
 @unittest.skipIf(
     not ie.current_env().is_interactive_ready,
@@ -75,30 +92,35 @@ class BackgroundCachingJobTest(unittest.TestCase):
 
   # TODO(BEAM-8335): remove the patches when there are appropriate test sources
   # that meet the boundedness checks.
-  @patch(
-      'apache_beam.runners.interactive.pipeline_instrument'
-      '.has_unbounded_sources',
-      lambda x: True)
+  @patch('apache_beam.runners.interactive.background_caching_job'
+         '.has_source_to_cache', lambda x: True)
+  @patch('apache_beam.runners.interactive.pipeline_instrument'
+         '.PipelineInstrument.streaming_cache_keys',
+         lambda x: (_TEST_CACHE_KEY,))
+  # Disable the clean up so that we can keep the test streaming cache.
+  @patch('apache_beam.runners.interactive.interactive_environment'
+         '.InteractiveEnvironment.cleanup', lambda x: None)
   def test_background_caching_job_starts_when_none_such_job_exists(self):
     p = _build_a_test_stream_pipeline()
+    _setup_test_streaming_cache()
     p.run()
     self.assertIsNotNone(ie.current_env().pipeline_result(p, is_main_job=False))
 
-  @patch(
-      'apache_beam.runners.interactive.pipeline_instrument'
-      '.has_unbounded_sources',
-      lambda x: False)
+  @patch('apache_beam.runners.interactive.background_caching_job'
+         '.has_source_to_cache', lambda x: False)
   def test_background_caching_job_not_start_for_batch_pipeline(self):
     p = _build_a_test_stream_pipeline()
     p.run()
     self.assertIsNone(ie.current_env().pipeline_result(p, is_main_job=False))
 
-  @patch(
-      'apache_beam.runners.interactive.pipeline_instrument'
-      '.has_unbounded_sources',
-      lambda x: True)
+  @patch('apache_beam.runners.interactive.background_caching_job'
+         '.has_source_to_cache', lambda x: True)
+  @patch('apache_beam.runners.interactive.pipeline_instrument'
+         '.PipelineInstrument.streaming_cache_keys',
+         lambda x: (_TEST_CACHE_KEY,))
   def test_background_caching_job_not_start_when_such_job_exists(self):
     p = _build_a_test_stream_pipeline()
+    _setup_test_streaming_cache()
     a_running_result = runner.PipelineResult(runner.PipelineState.RUNNING)
     ie.current_env().set_pipeline_result(p, a_running_result, is_main_job=False)
     main_job_result = p.run()
@@ -109,12 +131,14 @@ class BackgroundCachingJobTest(unittest.TestCase):
     # A new main job is started so result of the main job is set.
     self.assertIs(main_job_result, ie.current_env().pipeline_result(p))
 
-  @patch(
-      'apache_beam.runners.interactive.pipeline_instrument'
-      '.has_unbounded_sources',
-      lambda x: True)
+  @patch('apache_beam.runners.interactive.background_caching_job'
+         '.has_source_to_cache', lambda x: True)
+  @patch('apache_beam.runners.interactive.pipeline_instrument'
+         '.PipelineInstrument.streaming_cache_keys',
+         lambda x : (_TEST_CACHE_KEY,))
   def test_background_caching_job_not_start_when_such_job_is_done(self):
     p = _build_a_test_stream_pipeline()
+    _setup_test_streaming_cache()
     a_done_result = runner.PipelineResult(runner.PipelineState.DONE)
     ie.current_env().set_pipeline_result(p, a_done_result, is_main_job=False)
     main_job_result = p.run()

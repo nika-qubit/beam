@@ -28,6 +28,7 @@ import unittest
 import apache_beam as beam
 from apache_beam import coders
 from apache_beam.pipeline import PipelineVisitor
+from apache_beam.portability.api.beam_runner_api_pb2 import TestStreamPayload
 from apache_beam.runners.interactive import cache_manager as cache
 from apache_beam.runners.interactive import interactive_beam as ib
 from apache_beam.runners.interactive import interactive_environment as ie
@@ -250,12 +251,12 @@ class PipelineInstrumentTest(unittest.TestCase):
       ib.watch(locals())
     return (p, init_pcoll, second_pcoll)
 
-  def _mock_write_cache(self, pcoll, cache_key):
+  def _mock_write_cache(self, values, cache_key):
     """Cache the PCollection where cache.WriteCache would write to."""
     # Usually, the pcoder will be inferred from `pcoll.element_type`
     pcoder = coders.registry.get_coder(object)
     ie.current_env().cache_manager().save_pcoder(pcoder, 'full', cache_key)
-    ie.current_env().cache_manager().write([pcoll], 'full', cache_key)
+    ie.current_env().cache_manager().write(values, 'full', cache_key)
 
   def test_instrument_example_pipeline_to_write_cache(self):
     # Original instance defined by user code has all variables handlers.
@@ -281,12 +282,12 @@ class PipelineInstrumentTest(unittest.TestCase):
     p_copy, _, _ = self._example_pipeline(False)
 
     # Mock as if cacheable PCollections are cached.
-    init_pcoll_cache_key = 'init_pcoll_' + str(id(init_pcoll)) + '_' + str(
-        id(init_pcoll.producer))
-    self._mock_write_cache(init_pcoll, init_pcoll_cache_key)
+    init_pcoll_cache_key = 'init_pcoll_' + str(
+        id(init_pcoll)) + '_' + str(id(init_pcoll.producer))
+    self._mock_write_cache([b'1', b'2', b'3'], init_pcoll_cache_key)
     second_pcoll_cache_key = 'second_pcoll_' + str(
         id(second_pcoll)) + '_' + str(id(second_pcoll.producer))
-    self._mock_write_cache(second_pcoll, second_pcoll_cache_key)
+    self._mock_write_cache([b'1', b'4', b'9'], second_pcoll_cache_key)
     # Mark the completeness of PCollections from the original(user) pipeline.
     ie.current_env().mark_pcollection_computed(
         (p_origin, init_pcoll, second_pcoll))
@@ -342,10 +343,10 @@ class PipelineInstrumentTest(unittest.TestCase):
     # Mock as if cacheable PCollections are cached.
     init_pcoll_cache_key = 'init_pcoll_' + str(
         id(init_pcoll)) + '_' + str(id(init_pcoll.producer))
-    self._mock_write_cache(init_pcoll, init_pcoll_cache_key)
+    self._mock_write_cache([TestStreamPayload()], init_pcoll_cache_key)
     second_pcoll_cache_key = 'second_pcoll_' + str(
         id(second_pcoll)) + '_' + str(id(second_pcoll.producer))
-    self._mock_write_cache(second_pcoll, second_pcoll_cache_key)
+    self._mock_write_cache([TestStreamPayload()], second_pcoll_cache_key)
     instr.build_pipeline_instrument(p_copy)
 
     # Add the caching transforms.

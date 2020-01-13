@@ -19,17 +19,15 @@
 
 from __future__ import absolute_import
 
-import collections
-import itertools
 import unittest
 
 from apache_beam import coders
 from apache_beam.portability.api.beam_interactive_api_pb2 import TestStreamFileHeader
 from apache_beam.portability.api.beam_interactive_api_pb2 import TestStreamFileRecord
 from apache_beam.portability.api.beam_runner_api_pb2 import TestStreamPayload
-from apache_beam.runners.interactive.cache_manager import CacheManager
 from apache_beam.runners.interactive.caching.streaming_cache import StreamingCache
-from apache_beam.utils.timestamp import Timestamp
+from apache_beam.runners.interactive.testing.test_cache_manager import FileRecordsBuilder
+from apache_beam.runners.interactive.testing.test_cache_manager import InMemoryCache
 
 # Nose automatically detects tests if they match a regex. Here, it mistakens
 # these protos as tests. For more info see the Nose docs at:
@@ -37,63 +35,6 @@ from apache_beam.utils.timestamp import Timestamp
 TestStreamPayload.__test__ = False
 TestStreamFileHeader.__test__ = False
 TestStreamFileRecord.__test__ = False
-
-
-class InMemoryCache(CacheManager):
-  def __init__(self):
-    self._cached = collections.defaultdict(list)
-    self._pcoders = {}
-
-  def exists(self, *labels):
-    return self._key(*labels) in self._cached
-
-  def _latest_version(self, *labels):
-    return True
-
-  def read(self, *labels):
-    ret = itertools.chain(self._cached[self._key(*labels)])
-    return ret, None
-
-  def write(self, value, *labels):
-    self._cached[self._key(*labels)] += value
-
-  def save_pcoder(self, pcoder, *labels):
-    self._pcoders[self._key(*labels)] = pcoder
-
-  def load_pcoder(self, *labels):
-    return self._pcoders[self._key(*labels)]
-
-  def _key(self, *labels):
-    return ''.join([l for l in labels])
-
-
-class FileRecordsBuilder(object):
-  def __init__(self, tag=None):
-    self._header = TestStreamFileHeader(tag=tag)
-    self._records = []
-    self._coder = coders.FastPrimitivesCoder()
-
-  def add_element(self, element, event_time, processing_time):
-    element_payload = TestStreamPayload.Event.AddElements(
-        elements=[TestStreamPayload.TimestampedElement(
-            encoded_element=self._coder.encode(element),
-            timestamp=Timestamp.of(event_time).micros)])
-    record = TestStreamFileRecord(
-        element_event=element_payload,
-        processing_time=Timestamp.of(processing_time).to_proto())
-    self._records.append(record)
-    return self
-
-  def advance_watermark(self, watermark, processing_time):
-    record = TestStreamFileRecord(
-        watermark_event=TestStreamPayload.Event.AdvanceWatermark(
-            new_watermark=Timestamp.of(watermark).micros),
-        processing_time=Timestamp.of(processing_time).to_proto())
-    self._records.append(record)
-    return self
-
-  def build(self):
-    return [self._header] + self._records
 
 
 class StreamingCacheTest(unittest.TestCase):

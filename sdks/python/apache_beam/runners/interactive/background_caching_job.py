@@ -53,6 +53,8 @@ def attempt_to_run_background_caching_job(runner, user_pipeline, options=None):
   if is_background_caching_job_needed(user_pipeline):
     # Cancel non-terminal jobs if there is any before starting a new one.
     attempt_to_cancel_background_caching_job(user_pipeline)
+    # Cancel the gRPC server serving the test stream if there is one.
+    attempt_to_stop_test_stream_service(user_pipeline)
     # Evict all caches if there is any.
     ie.current_env().cleanup()
     # TODO(BEAM-8335): refactor background caching job logic from
@@ -93,7 +95,11 @@ def is_background_caching_job_needed(user_pipeline):
 
 def has_source_to_cache(user_pipeline):
   """Determines if a user-defined pipeline contains any source that need to be
-  cached."""
+  cached.
+
+  This can help determining if a background caching job is needed to write cache
+  for sources and if a test stream service is needed to serve the cache.
+  """
   from apache_beam.runners.interactive import pipeline_instrument as instr
   # TODO(BEAM-8335): we temporarily only cache replaceable unbounded sources.
   # Add logic for other cacheable sources here when they are available.
@@ -111,6 +117,24 @@ def attempt_to_cancel_background_caching_job(user_pipeline):
   if (background_caching_job_result and
       not ie.current_env().is_terminated(user_pipeline, is_main_job=False)):
     background_caching_job_result.cancel()
+
+
+def attempt_to_stop_test_stream_service(user_pipeline):
+  """Attempts to stop the gRPC server/service serving the test stream.
+
+  If there is no such server started, NOOP. Otherwise, stop it.
+  """
+  if is_a_test_stream_service_running(user_pipeline):
+    ie.current_env().evict_test_stream_service_controller(
+        user_pipeline).stop()
+
+
+def is_a_test_stream_service_running(user_pipeline):
+  """Checks to see if there is a gPRC server/service running that serves the
+  test stream to any job started from the given user_pipeline.
+  """
+  return ie.current_env().get_test_stream_service_controller(
+      user_pipeline) is not None
 
 
 def is_source_to_cache_changed(user_pipeline):

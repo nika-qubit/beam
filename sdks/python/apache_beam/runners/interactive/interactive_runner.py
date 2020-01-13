@@ -35,7 +35,9 @@ from apache_beam.runners.interactive import cache_manager as cache
 from apache_beam.runners.interactive import interactive_environment as ie
 from apache_beam.runners.interactive import pipeline_instrument as inst
 from apache_beam.runners.interactive import background_caching_job
+from apache_beam.runners.interactive.caching import streaming_cache
 from apache_beam.runners.interactive.display import pipeline_graph
+from apache_beam.testing import test_stream_service
 
 # size of PCollection samples cached.
 SAMPLE_SIZE = 8
@@ -151,6 +153,23 @@ class InteractiveRunner(runners.PipelineRunner):
       # Should use the underlying runner and run asynchronously.
       background_caching_job.attempt_to_run_background_caching_job(
           self._underlying_runner, user_pipeline, options)
+      if background_caching_job.has_source_to_cache(user_pipeline):
+        if not isinstance(ie.current_env().cache_manager(),
+                          streaming_cache.StreamingCache):
+          # Wrap the cache manager into a streaming cache manager. Note this
+          # does not invalidate the current cache manager.
+          ie.current_env().set_cache_manager(
+              streaming_cache.StreamingCache(ie.current_env().cache_manager()))
+        if not background_caching_job.is_a_test_stream_service_running(
+            user_pipeline):
+          streaming_cache_manager = ie.current_env().cache_manager()
+          if streaming_cache_manager:
+            reader = streaming_cache_manager.read_multiple(
+                pipeline_instrument.streaming_cache_keys())
+            controller = test_stream_service.TestStreamServiceController(reader)
+            ie.current_env().set_test_stream_service_controller(user_pipeline,
+                                                                controller)
+            controller.start()
 
     pipeline_to_execute = beam.pipeline.Pipeline.from_runner_api(
         pipeline_instrument.instrumented_pipeline_proto(),

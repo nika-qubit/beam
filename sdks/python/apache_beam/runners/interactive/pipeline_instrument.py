@@ -298,6 +298,13 @@ class PipelineInstrument(object):
     pipeline to instances in the user pipeline."""
     return self._runner_pcoll_to_user_pcoll
 
+  def streaming_cache_keys(self):
+    """Returns all keys (either to user-defined pcolls or cached source) that
+    have valid cache in the streaming cache.
+    """
+    # TODO(BEAM-8335): add the implementation through apache/beam/pull/10368.
+    return ()
+
   def instrument(self):
     """Instruments original pipeline with cache.
 
@@ -422,7 +429,8 @@ class PipelineInstrument(object):
     # computation has been completed.
 
     is_cached = self._cache_manager.exists('full', key)
-    is_computed = (self._runner_pcoll_to_user_pcoll[pcoll] in
+    is_computed = (pcoll in self._runner_pcoll_to_user_pcoll and
+                   self._runner_pcoll_to_user_pcoll[pcoll] in
                    ie.current_env().computed_pcollections)
     if (is_cached and (is_computed or is_unbounded_source_output)):
       if key not in self._cached_pcoll_read:
