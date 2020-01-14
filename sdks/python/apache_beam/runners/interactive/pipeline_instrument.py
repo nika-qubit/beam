@@ -29,6 +29,7 @@ import apache_beam as beam
 from apache_beam.io.gcp.pubsub import ReadFromPubSub
 from apache_beam.pipeline import PipelineVisitor
 from apache_beam.portability.api import beam_runner_api_pb2
+from apache_beam.runners.interactive import background_caching_job
 from apache_beam.runners.interactive import cache_manager as cache
 from apache_beam.runners.interactive import interactive_environment as ie
 from apache_beam.testing import test_stream
@@ -382,6 +383,14 @@ class PipelineInstrument(object):
             if not self._pin._user_pipeline:
               # Retrieve a reference to the user defined pipeline instance.
               self._pin._user_pipeline = user_pcoll.pipeline
+              # Once user_pipeline is retrieved, check if the user pipeline
+              # contains any source to cache. If so, current cache manager held
+              # by current interactive environment might get wrapped into a
+              # streaming cache, thus re-assign the reference to that cache
+              # manager.
+              if background_caching_job.has_source_to_cache(
+                  self._pin._user_pipeline):
+                self._pin._cache_manager = ie.current_env().cache_manager()
             self._pin._runner_pcoll_to_user_pcoll[pcoll] = user_pcoll
             self._pin.cacheables[cacheable_key]['pcoll'] = pcoll
 

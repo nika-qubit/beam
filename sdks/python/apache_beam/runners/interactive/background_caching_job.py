@@ -42,6 +42,7 @@ from __future__ import absolute_import
 import apache_beam as beam
 from apache_beam import runners
 from apache_beam.runners.interactive import interactive_environment as ie
+from apache_beam.runners.interactive.caching import streaming_cache
 
 
 def attempt_to_run_background_caching_job(runner, user_pipeline, options=None):
@@ -95,7 +96,9 @@ def is_background_caching_job_needed(user_pipeline):
 
 def has_source_to_cache(user_pipeline):
   """Determines if a user-defined pipeline contains any source that need to be
-  cached.
+  cached. If so, also immediately wrap current cache manager held by current
+  interactive environment into a streaming cache if this has not been done.
+  The wrapping doesn't invalidate existing cache in any way.
 
   This can help determining if a background caching job is needed to write cache
   for sources and if a test stream service is needed to serve the cache.
@@ -103,7 +106,15 @@ def has_source_to_cache(user_pipeline):
   from apache_beam.runners.interactive import pipeline_instrument as instr
   # TODO(BEAM-8335): we temporarily only cache replaceable unbounded sources.
   # Add logic for other cacheable sources here when they are available.
-  return instr.has_unbounded_sources(user_pipeline)
+  has_cache = instr.has_unbounded_sources(user_pipeline)
+  if has_cache:
+    if not isinstance(ie.current_env().cache_manager(),
+                      streaming_cache.StreamingCache):
+      # Wrap the cache manager into a streaming cache manager. Note this
+      # does not invalidate the current cache manager.
+      ie.current_env().set_cache_manager(
+          streaming_cache.StreamingCache(ie.current_env().cache_manager()))
+  return has_cache
 
 
 def attempt_to_cancel_background_caching_job(user_pipeline):
