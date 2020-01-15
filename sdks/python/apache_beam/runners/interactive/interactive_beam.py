@@ -165,8 +165,7 @@ def show(*pcolls):
   result = pf.PipelineFragment(list(pcolls), user_pipeline.options).run()
   ie.current_env().set_pipeline_result(
       user_pipeline,
-      result,
-      is_main_job=True)
+      result)
 
   # If in notebook, dynamic plotting as computation goes.
   if ie.current_env().is_in_notebook:

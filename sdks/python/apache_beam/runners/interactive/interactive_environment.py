@@ -30,6 +30,7 @@ import atexit
 import importlib
 import logging
 import sys
+from datetime import timedelta
 
 import apache_beam as beam
 from apache_beam.runners import runner
@@ -85,12 +86,11 @@ class InteractiveEnvironment(object):
     # InteractiveRunner is responsible for populating this dictionary
     # implicitly.
     self._main_pipeline_results = {}
-    # Holds results of background caching jobs as
-    # Dict[Pipeline, PipelineResult]. Each key is a pipeline instance defined by
-    # the end user. The InteractiveRunner or its enclosing scope is responsible
-    # for populating this dictionary implicitly when a background caching jobs
-    # is started.
-    self._background_caching_pipeline_results = {}
+    # Holds background caching jobs as Dict[Pipeline, BackgroundCachingJob].
+    # Each key is a pipeline instance defined by the end user. The
+    # InteractiveRunner or its enclosing scope is responsible for populating
+    # this dictionary implicitly when a background caching jobs is started.
+    self._background_caching_jobs = {}
     # Holds TestStreamServiceControllers that controls gRPC servers serving
     # events as test stream of TestStreamPayload.Event.
     # Dict[Pipeline, TestStreamServiceController]. Each key is a pipeline
@@ -101,6 +101,9 @@ class InteractiveEnvironment(object):
     # the gRPC server serves.
     self._test_stream_service_controllers = {}
     self._cached_source_signature = {}
+    # TODO(BEAM-8335): expose configuration of this when an API is agreed upon.
+    # The duration to capture source-to-cache.
+    self._streaming_cache_capture_duration = timedelta(seconds=60)
     self._tracked_user_pipelines = set()
     # Tracks the computation completeness of PCollections. PCollections tracked
     # here don't need to be re-computed when data introspection is needed.
@@ -227,33 +230,35 @@ class InteractiveEnvironment(object):
     """Gets the cache manager held by current Interactive Environment."""
     return self._cache_manager
 
-  def set_pipeline_result(self, pipeline, result, is_main_job):
-    """Sets the pipeline run result. Adds one if absent. Otherwise, replace.
-
-    When is_main_job is True, set the result for the main job; otherwise, set
-    the result for the background caching job.
-    """
+  def set_pipeline_result(self, pipeline, result):
+    """Sets the pipeline run result. Adds one if absent. Otherwise, replace."""
     assert issubclass(type(pipeline), beam.Pipeline), (
         'pipeline must be an instance of apache_beam.Pipeline or its subclass')
     assert issubclass(type(result), runner.PipelineResult), (
         'result must be an instance of '
         'apache_beam.runners.runner.PipelineResult or its subclass')
-    if is_main_job:
-      self._main_pipeline_results[pipeline] = result
-    else:
-      self._background_caching_pipeline_results[pipeline] = result
+    self._main_pipeline_results[pipeline] = result
 
-  def evict_pipeline_result(self, pipeline, is_main_job=True):
+  def evict_pipeline_result(self, pipeline):
     """Evicts the tracking of given pipeline run. Noop if absent."""
-    if is_main_job:
-      return self._main_pipeline_results.pop(pipeline, None)
-    return self._background_caching_pipeline_results.pop(pipeline, None)
+    return self._main_pipeline_results.pop(pipeline, None)
 
-  def pipeline_result(self, pipeline, is_main_job=True):
+  def pipeline_result(self, pipeline):
     """Gets the pipeline run result. None if absent."""
-    if is_main_job:
-      return self._main_pipeline_results.get(pipeline, None)
-    return self._background_caching_pipeline_results.get(pipeline, None)
+    return self._main_pipeline_results.get(pipeline, None)
+
+  def set_background_caching_job(self, pipeline, background_caching_job):
+    """Sets the background caching job started from the given pipeline."""
+    assert issubclass(type(pipeline), beam.Pipeline), (
+        'pipeline must be an instance of apache_beam.Pipeline or its subclass')
+    from apache_beam.runners.interactive.background_caching_job import BackgroundCachingJob
+    assert isinstance(background_caching_job, BackgroundCachingJob), (
+        'background_caching job must be an instance of BackgroundCachingJob')
+    self._background_caching_jobs[pipeline] = background_caching_job
+
+  def get_background_caching_job(self, pipeline):
+    """Gets the background caching job started from the given pipeline."""
+    return self._background_caching_jobs.get(pipeline, None)
 
   def set_test_stream_service_controller(self, pipeline, controller):
     """Sets the test stream service controller that has started a gRPC server
@@ -276,10 +281,10 @@ class InteractiveEnvironment(object):
     """
     return self._test_stream_service_controllers.pop(pipeline, None)
 
-  def is_terminated(self, pipeline, is_main_job=True):
+  def is_terminated(self, pipeline):
     """Queries if the most recent job (by executing the given pipeline) state
     is in a terminal state. True if absent."""
-    result = self.pipeline_result(pipeline, is_main_job=is_main_job)
+    result = self.pipeline_result(pipeline)
     if result:
       return runner.PipelineState.is_terminal(result.state)
     return True

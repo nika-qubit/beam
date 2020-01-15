@@ -35,7 +35,6 @@ from apache_beam.runners.interactive import cache_manager as cache
 from apache_beam.runners.interactive import interactive_environment as ie
 from apache_beam.runners.interactive import pipeline_instrument as inst
 from apache_beam.runners.interactive import background_caching_job
-from apache_beam.runners.interactive.caching import streaming_cache
 from apache_beam.runners.interactive.display import pipeline_graph
 from apache_beam.testing import test_stream_service
 
@@ -182,8 +181,7 @@ class InteractiveRunner(runners.PipelineRunner):
     # outer scopes are also recommended since the user_pipeline might not be
     # available from within this scope.
     if user_pipeline:
-      ie.current_env().set_pipeline_result(
-          user_pipeline, main_job_result, is_main_job=True)
+      ie.current_env().set_pipeline_result(user_pipeline, main_job_result)
 
     if self._blocking:
       main_job_result.wait_until_finish()

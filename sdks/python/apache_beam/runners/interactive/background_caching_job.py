@@ -39,10 +39,67 @@ invalidated.
 
 from __future__ import absolute_import
 
+import threading
+
 import apache_beam as beam
-from apache_beam import runners
+from apache_beam.runners.runner import PipelineState
 from apache_beam.runners.interactive import interactive_environment as ie
 from apache_beam.runners.interactive.caching import streaming_cache
+
+
+class BackgroundCachingJob(object):
+  """A simple abstraction that controls necessary components of a timed
+  background caching job.
+
+  A background caching job successfully terminates in 2 conditions:
+
+    #. The job is finite and run into DONE state;
+    #. The job is infinite but hit an interactive environment configured time
+       limit and gets cancelled into CANCELLED state.
+
+  In both situations, the background caching job should be treated as done
+  successfully.
+  """
+
+  def __init__(self, pipeline_result):
+    self._pipeline_result = pipeline_result
+    self._timer = threading.Timer(
+        ie.current_env()._streaming_cache_capture_duration.total_seconds(),
+        self._cancel)
+    self._timer.start()
+    self._timer_triggered = False
+
+  def is_done(self):
+    return (self._pipeline_result.state is PipelineState.DONE
+            or (self._timer_triggered
+                and self._pipeline_result.state in (
+                    PipelineState.CANCELLED,
+                    PipelineState.CANCELLING)))
+
+  def is_running(self):
+    return self._pipeline_result.state is PipelineState.RUNNING
+
+  def cancel(self):
+    """Cancels this background caching job and its terminating timer because
+    the job is invalidated and no longer useful.
+
+    This process cancels any non-terminated job and its terminating timer.
+    """
+    self._cancel()
+    # Whenever this function is invoked, the cancellation is not done by the
+    # terminating timer, thus re-mark the timer as not triggered.
+    self._timer_triggered = False
+    if self._timer.is_alive():
+      self._timer.cancel()
+
+  def _cancel(self):
+    self._timer_triggered = True
+    if not PipelineState.is_terminal(self._pipeline_result.state):
+      try:
+        self._pipeline_result.cancel()
+      except NotImplementedError:
+        # Ignore the cancel invocation if it is never implemented by the runner.
+        pass
 
 
 def attempt_to_run_background_caching_job(runner, user_pipeline, options=None):
@@ -68,30 +125,26 @@ def attempt_to_run_background_caching_job(runner, user_pipeline, options=None):
             runner_pipeline).background_caching_pipeline_proto(),
         runner,
         options).run()
-    ie.current_env().set_pipeline_result(
-        user_pipeline, background_caching_job_result, is_main_job=False)
+    ie.current_env().set_background_caching_job(
+        user_pipeline, BackgroundCachingJob(background_caching_job_result))
 
 
 def is_background_caching_job_needed(user_pipeline):
   """Determines if a background caching job needs to be started."""
-  background_caching_job_result = ie.current_env().pipeline_result(
-      user_pipeline, is_main_job=False)
+  job = ie.current_env().get_background_caching_job(user_pipeline)
   # Checks if the pipeline contains any source that needs to be cached.
-  return (
-      has_source_to_cache(user_pipeline) and
-      # Checks if it's the first time running a job from the pipeline.
-      (
-          not background_caching_job_result or
-          # Or checks if there is no previous job.
-          background_caching_job_result.state not in (
-              # DONE means a previous job has completed successfully and the
-              # cached events are still valid.
-              runners.runner.PipelineState.DONE,
-              # RUNNING means a previous job has been started and is still
-              # running.
-              runners.runner.PipelineState.RUNNING) or
-          # Or checks if we can invalidate the previous job.
-          is_source_to_cache_changed(user_pipeline)))
+  return (has_source_to_cache(user_pipeline) and
+          # Checks if it's the first time running a job from the pipeline.
+          (not job or
+           # Or checks if there is no previous job.
+           # DONE means a previous job has completed successfully and the
+           # cached events might still be valid.
+           not (job.is_done() or
+                # RUNNING means a previous job has been started and is still
+                # running.
+                job.is_running()) or
+           # Or checks if we can invalidate the previous job.
+           is_source_to_cache_changed(user_pipeline)))
 
 
 def has_source_to_cache(user_pipeline):
@@ -123,11 +176,9 @@ def attempt_to_cancel_background_caching_job(user_pipeline):
   If no background caching job needs to be cancelled, NOOP. Otherwise, cancel
   such job.
   """
-  background_caching_job_result = ie.current_env().pipeline_result(
-      user_pipeline, is_main_job=False)
-  if (background_caching_job_result and
-      not ie.current_env().is_terminated(user_pipeline, is_main_job=False)):
-    background_caching_job_result.cancel()
+  job = ie.current_env().get_background_caching_job(user_pipeline)
+  if job:
+    job.cancel()
 
 
 def attempt_to_stop_test_stream_service(user_pipeline):

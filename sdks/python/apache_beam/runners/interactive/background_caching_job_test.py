@@ -88,6 +88,8 @@ def _setup_test_streaming_cache():
     '[interactive] dependency is not installed.')
 class BackgroundCachingJobTest(unittest.TestCase):
   def tearDown(self):
+    for _, job in ie.current_env()._background_caching_jobs.items():
+        job.cancel()
     ie.new_env()
 
   # TODO(BEAM-8335): remove the patches when there are appropriate test sources
@@ -104,30 +106,36 @@ class BackgroundCachingJobTest(unittest.TestCase):
     p = _build_a_test_stream_pipeline()
     _setup_test_streaming_cache()
     p.run()
-    self.assertIsNotNone(ie.current_env().pipeline_result(p, is_main_job=False))
+    self.assertIsNotNone(
+        ie.current_env().get_background_caching_job(p))
 
   @patch('apache_beam.runners.interactive.background_caching_job'
          '.has_source_to_cache', lambda x: False)
   def test_background_caching_job_not_start_for_batch_pipeline(self):
     p = _build_a_test_stream_pipeline()
     p.run()
-    self.assertIsNone(ie.current_env().pipeline_result(p, is_main_job=False))
+    self.assertIsNone(
+        ie.current_env().get_background_caching_job(p))
 
   @patch('apache_beam.runners.interactive.background_caching_job'
          '.has_source_to_cache', lambda x: True)
   @patch('apache_beam.runners.interactive.pipeline_instrument'
          '.PipelineInstrument.streaming_cache_keys',
          lambda x: (_TEST_CACHE_KEY,))
+  # Disable the clean up so that we can keep the test streaming cache.
+  @patch('apache_beam.runners.interactive.interactive_environment'
+         '.InteractiveEnvironment.cleanup', lambda x: None)
   def test_background_caching_job_not_start_when_such_job_exists(self):
     p = _build_a_test_stream_pipeline()
     _setup_test_streaming_cache()
-    a_running_result = runner.PipelineResult(runner.PipelineState.RUNNING)
-    ie.current_env().set_pipeline_result(p, a_running_result, is_main_job=False)
+    a_running_background_caching_job = bcj.BackgroundCachingJob(
+        runner.PipelineResult(runner.PipelineState.RUNNING))
+    ie.current_env().set_background_caching_job(
+        p, a_running_background_caching_job)
     main_job_result = p.run()
     # No background caching job is started so result is still the running one.
-    self.assertIs(
-        a_running_result,
-        ie.current_env().pipeline_result(p, is_main_job=False))
+    self.assertIs(a_running_background_caching_job,
+                  ie.current_env().get_background_caching_job(p))
     # A new main job is started so result of the main job is set.
     self.assertIs(main_job_result, ie.current_env().pipeline_result(p))
 
@@ -136,15 +144,20 @@ class BackgroundCachingJobTest(unittest.TestCase):
   @patch('apache_beam.runners.interactive.pipeline_instrument'
          '.PipelineInstrument.streaming_cache_keys',
          lambda x : (_TEST_CACHE_KEY,))
+  # Disable the clean up so that we can keep the test streaming cache.
+  @patch('apache_beam.runners.interactive.interactive_environment'
+         '.InteractiveEnvironment.cleanup', lambda x: None)
   def test_background_caching_job_not_start_when_such_job_is_done(self):
     p = _build_a_test_stream_pipeline()
     _setup_test_streaming_cache()
-    a_done_result = runner.PipelineResult(runner.PipelineState.DONE)
-    ie.current_env().set_pipeline_result(p, a_done_result, is_main_job=False)
+    a_done_background_caching_job = bcj.BackgroundCachingJob(
+        runner.PipelineResult(runner.PipelineState.DONE))
+    ie.current_env().set_background_caching_job(p,
+                                                a_done_background_caching_job)
     main_job_result = p.run()
     # No background caching job is started so result is still the running one.
-    self.assertIs(
-        a_done_result, ie.current_env().pipeline_result(p, is_main_job=False))
+    self.assertIs(a_done_background_caching_job,
+                  ie.current_env().get_background_caching_job(p))
     # A new main job is started so result of the main job is set.
     self.assertIs(main_job_result, ie.current_env().pipeline_result(p))
 
