@@ -41,6 +41,7 @@ import apache_beam.io as io
 from apache_beam import coders
 from apache_beam import pvalue
 from apache_beam.internal import pickler
+from apache_beam.portability.api import beam_runner_api_pb2
 from apache_beam.runners import common
 from apache_beam.runners.common import DoFnRunner
 from apache_beam.runners.common import DoFnState
@@ -60,8 +61,8 @@ from apache_beam.runners.direct.watermark_manager import WatermarkManager
 from apache_beam.testing.test_stream import ElementEvent
 from apache_beam.testing.test_stream import ProcessingTimeEvent
 from apache_beam.testing.test_stream import WatermarkEvent
-from apache_beam.testing.test_stream import _TimingInfoReporter
 from apache_beam.testing.test_stream import _TimingInfo
+from apache_beam.testing.test_stream import _TimingInfoReporter
 from apache_beam.transforms import core
 from apache_beam.transforms.trigger import InMemoryUnmergedState
 from apache_beam.transforms.trigger import TimeDomain
@@ -72,10 +73,12 @@ from apache_beam.transforms.trigger import create_trigger_driver
 from apache_beam.transforms.userstate import get_dofn_specs
 from apache_beam.transforms.userstate import is_stateful_dofn
 from apache_beam.transforms.window import GlobalWindows
+from apache_beam.transforms.window import TimestampedValue
 from apache_beam.transforms.window import WindowedValue
 from apache_beam.typehints.typecheck import TypeCheckError
 from apache_beam.utils import counters
 from apache_beam.utils.timestamp import MIN_TIMESTAMP
+from apache_beam.utils.timestamp import Duration
 from apache_beam.utils.timestamp import Timestamp
 
 if TYPE_CHECKING:
@@ -215,6 +218,13 @@ class _TestStreamRootBundleProvider(RootBundleProvider):
   """
   def get_root_bundles(self):
     test_stream = self._applied_ptransform.transform
+    if self._evaluation_context._test_stream_event_stub:
+      stub = self._evaluation_context._test_stream_event_stub
+      test_stream_event_channel = stub.Events(
+          beam_runner_api_pb2.EventsRequest(keys=list(test_stream.output_tags)))
+      self._evaluation_context._test_stream_event_channel = \
+          test_stream_event_channel
+
     bundle = self._evaluation_context.create_bundle(
         pvalue.PBegin(self._applied_ptransform.transform.pipeline))
     bundle.add(
@@ -410,7 +420,6 @@ class _WatermarkControllerEvaluator(_TransformEvaluator):
   @_watermark.setter
   def _watermark(self, watermark):
     self._state.set_global_state(self.WATERMARK_TAG, watermark)
-    # print('watermark is now', watermark)
 
   def start_bundle(self):
     self.bundles = []
@@ -490,12 +499,16 @@ class _TestStreamEvaluator(_TransformEvaluator):
       input_committed_bundle,
       side_inputs):
     assert not side_inputs
-    self.test_stream = applied_ptransform.transform
     super(_TestStreamEvaluator, self).__init__(
         evaluation_context,
         applied_ptransform,
         input_committed_bundle,
         side_inputs)
+    self.test_stream = applied_ptransform.transform
+    self.test_stream_event_channel = \
+        evaluation_context._test_stream_event_channel
+    self.test_stream_event_channel_is_done = \
+        self.test_stream_event_channel is None
 
   def start_bundle(self):
     self.current_index = 0
@@ -512,7 +525,40 @@ class _TestStreamEvaluator(_TransformEvaluator):
     # We can either have the _TestStream or the _WatermarkController to emit
     # the elements. We chose to emit in the _WatermarkController so that the
     # element is emitted at the correct watermark value.
-    for event in self.test_stream.events(self.current_index):
+    events = []
+    if self.watermark == MIN_TIMESTAMP:
+      for event in self.test_stream._set_up(self.test_stream.output_tags):
+        events.append(event)
+
+    if self.test_stream_event_channel:
+      try:
+        event = next(self.test_stream_event_channel)
+        if event.HasField('element_event'):
+          element_event = event.element_event
+          elements = [
+              TimestampedValue(self.test_stream.coder.decode(e.encoded_element),
+                               Timestamp(micros=e.timestamp))
+              for e in element_event.elements]
+          events.append(ElementEvent(timestamped_values=elements,
+                                     tag=element_event.tag))
+        elif event.HasField('watermark_event'):
+          watermark_event = event.watermark_event
+          events.append(WatermarkEvent(
+              Timestamp(micros=watermark_event.new_watermark),
+              tag=watermark_event.tag))
+        elif event.HasField('processing_time_event'):
+          processing_time_event = event.processing_time_event
+          events.append(ProcessingTimeEvent(
+              Duration(micros=processing_time_event.advance_duration)))
+      except StopIteration:
+        self.test_stream_event_channel_is_done = True
+        events += (
+            [e for e in self.test_stream._tear_down(
+                self.test_stream.output_tags)])
+    else:
+      events += [e for e in self.test_stream.events(self.current_index)]
+
+    for event in events:
       if isinstance(event, (ElementEvent, WatermarkEvent)):
         # The WATERMARK_CONTROL_TAG is used to hold the _TestStream's
         # watermark to -inf, then +inf-1, then +inf. This watermark progression
@@ -534,7 +580,9 @@ class _TestStreamEvaluator(_TransformEvaluator):
   def finish_bundle(self):
     unprocessed_bundles = []
     next_index = self.test_stream.next(self.current_index)
-    if not self.test_stream.end(next_index):
+
+    if (not self.test_stream.end(next_index) or
+        not self.test_stream_event_channel_is_done):
       unprocessed_bundle = self._evaluation_context.create_bundle(
           pvalue.PBegin(self._applied_ptransform.transform.pipeline))
       unprocessed_bundle.add(
@@ -824,7 +872,6 @@ class _ParDoEvaluator(_TransformEvaluator):
   def process_timer(self, timer_firing):
     if timer_firing.name not in self.user_timer_map:
       _LOGGER.warning('Unknown timer fired: %s', timer_firing)
-    # print('timer fired', timer_firing)
     timer_spec = self.user_timer_map[timer_firing.name]
     self.runner.process_user_timer(
         timer_spec,
@@ -1037,7 +1084,6 @@ class _StreamingGroupAlsoByWindowEvaluator(_TransformEvaluator):
     self.key_coder = coders.registry.get_coder(key_type_hint)
 
   def process_element(self, element):
-    # print('process element start')
     kwi = element.value
     assert isinstance(kwi, KeyedWorkItem), kwi
     encoded_k, timer_firings, vs = (
@@ -1063,7 +1109,6 @@ class _StreamingGroupAlsoByWindowEvaluator(_TransformEvaluator):
         self.gabw_items.append(wvalue.with_value((k, wvalue.value)))
 
     self.keyed_holds[encoded_k] = state.get_earliest_hold()
-    # print('here')
 
   def finish_bundle(self):
     bundles = []
