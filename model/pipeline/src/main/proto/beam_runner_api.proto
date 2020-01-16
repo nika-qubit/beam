@@ -576,7 +576,11 @@ service TestStreamService {
   // A TestStream will request for events using this RPC.
   rpc Events(EventsRequest) returns (stream TestStreamPayload.Event) {}
 }
-message EventsRequest {}
+
+message EventsRequest {
+  // The set of keys to read from.
+  repeated string keys = 1;
+}
 
 // The payload for the special-but-not-primitive WriteFiles transform.
 message WriteFilesPayload {
