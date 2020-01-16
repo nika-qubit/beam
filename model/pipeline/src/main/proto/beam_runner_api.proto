@@ -578,7 +578,8 @@ service TestStreamService {
 }
 
 message EventsRequest {
-  // The set of keys to read from.
+  // The set of keys to read from. The keys are the specific PCollections to
+  // read.
   repeated string keys = 1;
 }
 
