@@ -32,6 +32,7 @@ from apache_beam.portability.api import beam_runner_api_pb2
 from apache_beam.runners.interactive import background_caching_job
 from apache_beam.runners.interactive import cache_manager as cache
 from apache_beam.runners.interactive import interactive_environment as ie
+from apache_beam.runners.interactive import pipeline_fragment as pf
 from apache_beam.testing import test_stream
 
 READ_CACHE = "_ReadCache_"
@@ -108,8 +109,26 @@ class PipelineInstrument(object):
     # after preprocess().
     self._runner_pcoll_to_user_pcoll = {}
 
+    # Refers target pcolls output by instrumented write cache transforms, used
+    # by pruning logic as supplemental targets to build pipeline fragment up
+    # from.
+    self._extended_targets = set()
+
+    # Refers pcolls used as inputs but got replaced by outputs of read cache
+    # transforms instrumented, used by pruning logic as targets no longer need
+    # to be produced during pipeline runs.
+    self._ignored_targets = set()
+
   def instrumented_pipeline_proto(self):
     """Always returns a new instance of portable instrumented proto."""
+    targets = set(self._runner_pcoll_to_user_pcoll.keys())
+    targets.update(self._extended_targets)
+    targets = targets.difference(self._ignored_targets)
+    if len(targets) > 0:
+      # Prunes upstream transforms that don't contribute to the targets the
+      # instrumented pipeline run cares.
+      return pf.PipelineFragment(list(targets)).deduce_fragment().to_runner_api(
+          use_fake_coders=True)
     return self._pipeline.to_runner_api(use_fake_coders=True)
 
   def _required_components(self, pipeline_proto, required_transforms_ids):
@@ -232,7 +251,8 @@ class PipelineInstrument(object):
     pipeline_to_execute.root_transform_ids[:] = roots
     set_proto_map(pipeline_to_execute.components.transforms, t)
     set_proto_map(pipeline_to_execute.components.pcollections, p)
-    set_proto_map(pipeline_to_execute.components.coders, context.to_runner_api().coders)
+    set_proto_map(pipeline_to_execute.components.coders,
+                  context.to_runner_api().coders)
     set_proto_map(pipeline_to_execute.components.windowing_strategies, w)
 
     # Cut out all subtransforms in the root that aren't the required transforms.
@@ -351,8 +371,6 @@ class PipelineInstrument(object):
         self._write_cache(
             self._background_caching_pipeline, source.outputs[None])
 
-    # TODO(BEAM-7760): prune sub graphs that doesn't need to be executed.
-
   def preprocess(self):
     """Pre-processes the pipeline.
 
@@ -418,7 +436,9 @@ class PipelineInstrument(object):
     # Only need to write when the cache with expected key doesn't exist.
     if not self._cache_manager.exists('full', key):
       label = '{}{}'.format(WRITE_CACHE, key)
-      _ = pcoll | label >> cache.WriteCache(self._cache_manager, key)
+      extended_target = pcoll | label >> cache.WriteCache(
+          self._cache_manager, key)
+      self._extended_targets.add(extended_target)
 
   def _read_cache(self, pipeline, pcoll, is_unbounded_source_output):
     """Reads a cached pvalue.
@@ -519,6 +539,8 @@ class PipelineInstrument(object):
             # Replace the input pcollection with the cached pcollection (if it
             # has been cached).
             if key in self._pin._cached_pcoll_read:
+              # Ignore this pcoll in the final pruned instrumented pipeline.
+              self._pin._ignored_targets.add(input_pcoll)
               input_list[i] = self._pin._cached_pcoll_read[key]
           # Update the transform with its new inputs.
           transform_node.inputs = tuple(input_list)

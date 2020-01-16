@@ -40,6 +40,7 @@ from apache_beam.runners.interactive import background_caching_job as bcj
 from apache_beam.runners.interactive import interactive_environment as ie
 from apache_beam.runners.interactive import interactive_runner as ir
 from apache_beam.runners.interactive import pipeline_fragment as pf
+from apache_beam.runners.interactive.display import pipeline_graph
 from apache_beam.runners.interactive.display.pcoll_visualization import visualize
 
 
@@ -186,3 +187,9 @@ def show(*pcolls):
   # invocation occurs, Interactive Beam wouldn't need to re-compute them.
   if result.state is beam.runners.runner.PipelineState.DONE:
     ie.current_env().mark_pcollection_computed(pcolls)
+
+
+def show_graph(pipeline):
+  """Shows the current pipeline shape of a given Beam pipeline as a DAG.
+  """
+  pipeline_graph.PipelineGraph(pipeline).display_graph()

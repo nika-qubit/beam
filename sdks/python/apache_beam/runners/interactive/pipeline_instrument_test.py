@@ -37,6 +37,8 @@ from apache_beam.runners.interactive import interactive_runner
 from apache_beam.runners.interactive.cache_manager import CacheManager
 from apache_beam.runners.interactive.caching import streaming_cache
 from apache_beam.runners.interactive.testing.pipeline_assertion import assert_pipeline_equal
+from apache_beam.runners.interactive.testing.pipeline_assertion import assert_pipeline_proto_contain_top_level_transform
+from apache_beam.runners.interactive.testing.pipeline_assertion import assert_pipeline_proto_not_contain_top_level_transform
 from apache_beam.runners.interactive.testing.pipeline_assertion import assert_pipeline_proto_equal
 from apache_beam.testing.test_stream import TestStream
 
@@ -374,6 +376,41 @@ class PipelineInstrumentTest(unittest.TestCase):
     v = TestReadCacheWireVisitor()
     p_origin.visit(v)
     assert_pipeline_equal(self, p_origin, p_copy)
+
+  def test_pipeline_pruned_when_input_pcoll_is_cached(self):
+    user_pipeline, init_pcoll, second_pcoll = self._example_pipeline()
+    runner_pipeline = beam.Pipeline.from_runner_api(
+        user_pipeline.to_runner_api(use_fake_coders=True),
+        user_pipeline.runner,
+        None)
+
+    # Mock as if init_pcoll is cached.
+    init_pcoll_cache_key = 'init_pcoll_' + str(
+        id(init_pcoll)) + '_' + str(id(init_pcoll.producer))
+    self._mock_write_cache([b'1', b'2', b'3'], init_pcoll_cache_key)
+    ie.current_env().mark_pcollection_computed([init_pcoll])
+    # Build an instrument from the runner pipeline.
+    pipeline_instrument = instr.build_pipeline_instrument(runner_pipeline)
+
+    pruned_proto = pipeline_instrument.instrumented_pipeline_proto()
+    # Skip the prune step for comparison, it should contain the sub-graph that
+    # produces init_pcoll but not useful anymore.
+    full_proto = pipeline_instrument._pipeline.to_runner_api(
+        use_fake_coders=True)
+    self.assertEqual(
+        len(pruned_proto.components.transforms[
+              'ref_AppliedPTransform_AppliedPTransform_1'].subtransforms), 3)
+    assert_pipeline_proto_not_contain_top_level_transform(
+        self,
+        pruned_proto,
+        'Init Source')
+    self.assertEqual(
+        len(full_proto.components.transforms[
+              'ref_AppliedPTransform_AppliedPTransform_1'].subtransforms), 4)
+    assert_pipeline_proto_contain_top_level_transform(
+        self,
+        full_proto,
+        'Init Source')
 
 
 if __name__ == '__main__':
