@@ -205,6 +205,7 @@ class PipelineInstrumentTest(unittest.TestCase):
     self.assertFalse(instr.has_unbounded_sources(p))
 
   def test_background_caching_pipeline_proto(self):
+    ie.new_env(cache_manager=streaming_cache.StreamingCache(cache_dir=None))
     p = beam.Pipeline(interactive_runner.InteractiveRunner())
 
     # Test that the two ReadFromPubSub are correctly cut out.
@@ -336,7 +337,7 @@ class PipelineInstrumentTest(unittest.TestCase):
     self.assertIs(pipeline_instrument.user_pipeline, user_pipeline)
 
   def test_instrument_example_unbounded_pipeline_to_read_cache(self):
-    ie.new_env(cache_manager=streaming_cache.StreamingCache(InMemoryCache()))
+    ie.new_env(cache_manager=streaming_cache.StreamingCache(cache_dir=None))
 
     p_origin, init_pcoll, second_pcoll = self._example_pipeline(watch=True,
                                                                 bounded=False)

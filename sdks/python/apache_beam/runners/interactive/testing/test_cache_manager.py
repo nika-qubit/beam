@@ -75,22 +75,22 @@ class FileRecordsBuilder(object):
     self._records = []
     self._coder = coders.FastPrimitivesCoder()
 
-  def add_element(self, element, event_time, processing_time):
+  def add_element(self, element, event_time_secs, processing_time_secs):
     element_payload = TestStreamPayload.Event.AddElements(
         elements=[TestStreamPayload.TimestampedElement(
             encoded_element=self._coder.encode(element),
-            timestamp=Timestamp.of(event_time).micros)])
+            timestamp=Timestamp.of(event_time_secs).micros)])
     record = TestStreamFileRecord(
         element_event=element_payload,
-        processing_time=Timestamp.of(processing_time).to_proto())
+        processing_time=Timestamp.of(processing_time_secs).to_proto())
     self._records.append(record)
     return self
 
-  def advance_watermark(self, watermark, processing_time):
+  def advance_watermark(self, watermark_secs, processing_time_secs):
     record = TestStreamFileRecord(
         watermark_event=TestStreamPayload.Event.AdvanceWatermark(
-            new_watermark=Timestamp.of(watermark).micros),
-        processing_time=Timestamp.of(processing_time).to_proto())
+            new_watermark=Timestamp.of(watermark_secs).micros),
+        processing_time=Timestamp.of(processing_time_secs).to_proto())
     self._records.append(record)
     return self
 

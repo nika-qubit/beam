@@ -19,77 +19,221 @@
 
 from __future__ import absolute_import
 
+import datetime
 import itertools
+import os
+import shutil
+import tempfile
+import time
 
 import apache_beam as beam
 from apache_beam.portability.api.beam_interactive_api_pb2 import TestStreamFileHeader
 from apache_beam.portability.api.beam_interactive_api_pb2 import TestStreamFileRecord
 from apache_beam.portability.api.beam_runner_api_pb2 import TestStreamPayload
 from apache_beam.runners.interactive.cache_manager import CacheManager
+from apache_beam.runners.interactive.cache_manager import SafeFastPrimitivesCoder
+from apache_beam.testing.test_stream import ReverseTestStream
 from apache_beam.utils import timestamp
 from apache_beam.utils.timestamp import Timestamp
 
 
 class StreamingCacheSink(beam.PTransform):
-  def __init__(self, underlying_sink):
-    self._underlying_sink = underlying_sink
+  def __init__(self, cache_dir, filename, sample_resolution_sec,
+               coder=SafeFastPrimitivesCoder()):
+    self._cache_dir = cache_dir
+    self._filename = filename
+    self._sample_resolution_sec = sample_resolution_sec
+    self._coder = coder
 
   def expand(self, pcoll):
-    from apache_beam.testing.test_stream import ReverseTestStream
+    # Note that this assumes that the elements are ordered, so it only works on
+    # the DirectRunner.
+
+    # This is broken in a number of different ways:
+    #  * Assumes elements come in ordered
+    #  * Assumes that there is only one machine doing the writing
+    #
+    class StreamingWriteToText(beam.DoFn):
+      def __init__(self, path, filename, coder=SafeFastPrimitivesCoder()):
+        self._path = path
+        self._filename = filename
+        self._full_path = os.path.join(self._path, self._filename)
+        self.coder = coder
+
+        if not os.path.exists(self._path):
+          os.makedirs(self._path)
+
+      def start_bundle(self):
+        self._fh = open(self._full_path, 'ab')
+
+      def finish_bundle(self):
+        self._fh.close()
+
+      def process(self, e):
+        self._fh.write(self.coder.encode(e))
+        self._fh.write(b'\n')
 
     return (pcoll
-            | ReverseTestStream(sample_resolution_sec=0.1,
-                                output_format=ReverseTestStream.SERIALIZED)
-            | self._underlying_sink)
+            | ReverseTestStream(
+                output_tag=self._filename,
+                sample_resolution_sec=self._sample_resolution_sec,
+                output_format=ReverseTestStream.SERIALIZED,
+                coder=self._coder)
+            | beam.ParDo(StreamingWriteToText(path=self._cache_dir,
+                                              filename=self._filename,
+                                              coder=self._coder))
+            )
+
+
+class StreamingCacheSource:
+  def __init__(self, cache_dir, labels, is_cache_complete=None,
+               coder=SafeFastPrimitivesCoder()):
+    self._cache_dir = cache_dir
+    self._coder = coder
+    self._labels = labels
+    self._is_cache_complete = (is_cache_complete
+                               if is_cache_complete
+                               else lambda: True)
+
+  def _wait_until_file_exists(self, timeout_secs=30):
+    f = None
+    now_secs = time.time()
+    timeout_timestamp_secs = now_secs + timeout_secs
+    while f is None and now_secs < timeout_timestamp_secs:
+      now_secs = time.time()
+      try:
+        path = os.path.join(self._cache_dir, *self._labels)
+        f = open(path)
+      except EnvironmentError as e:
+        # For Python2 and Python3 compatibility, this checks the
+        # EnvironmentError to see if the file exists.
+        # TODO: Change this to a FileNotFoundError when Python3 migration is
+        # complete.
+        import errno
+        if e.errno != errno.ENOENT:
+          # Raise the exception if it is not a FileNotFoundError.
+          raise
+        time.sleep(1)
+    if now_secs >= timeout_timestamp_secs:
+      raise TimeoutError(
+          "Timed out waiting for file '{}' to be available".format(path))
+    return f
+
+  def _emit_from_file(self, fh):
+    # Always read at least once to read the whole file.
+    while True:
+      pos = fh.tell()
+      line = fh.readline()
+
+      # Check if we are at EOF.
+      if not line:
+        # Complete reading only when the cache is complete.
+        if self._is_cache_complete():
+          break
+
+        # Otherwise wait for new data in the file to be written.
+        time.sleep(0.5)
+        fh.seek(pos)
+      else:
+        # The first line at pos = 0 is always the header. Read the line without
+        # the new line.
+        if pos == 0:
+          header = TestStreamFileHeader()
+          header.ParseFromString(self._coder.decode(line[:-1]))
+          yield header
+        else:
+          record = TestStreamFileRecord()
+          record.ParseFromString(self._coder.decode(line[:-1]))
+          yield record
+
+  def read(self):
+    try:
+      f = self._wait_until_file_exists()
+      for e in self._emit_from_file(f):
+        yield e
+    finally:
+      f.close()
 
 
 class StreamingCache(CacheManager):
   """Abstraction that holds the logic for reading and writing to cache.
   """
-  def __init__(self, underlying_cache_manager):
-    self._cache_manager = underlying_cache_manager
+  def __init__(self, cache_dir, is_cache_complete=None,
+               sample_resolution_sec=0.1):
+    self._sample_resolution_sec = sample_resolution_sec
+    self._is_cache_complete = is_cache_complete
+
+    if cache_dir:
+      self._cache_dir = cache_dir
+    else:
+      self._cache_dir = tempfile.mkdtemp(
+          prefix='interactive-temp-', dir=os.environ.get('TEST_TMPDIR', None))
+
+    # List of saved pcoders keyed by PCollection path. It is OK to keep this
+    # list in memory because once FileBasedCacheManager object is
+    # destroyed/re-created it loses the access to previously written cache
+    # objects anyways even if cache_dir already exists. In other words,
+    # it is not possible to resume execution of Beam pipeline from the
+    # saved cache if FileBasedCacheManager has been reset.
+    #
+    # However, if we are to implement better cache persistence, one needs
+    # to take care of keeping consistency between the cached PCollection
+    # and its PCoder type.
+    self._saved_pcoders = {}
+    self._default_pcoder = SafeFastPrimitivesCoder()
 
   def exists(self, *labels):
-    return self._cache_manager.exists(*labels)
+    path = os.path.join(self._cache_dir, *labels)
+    return os.path.exists(path)
 
-  def _latest_version(self, *labels):
-    return self._cache_manager._latest_version(*labels)
-
+  # TODO(srohde): Modify this to return the correct version.
   def read(self, *labels):
     if not self.exists(*labels):
       return itertools.chain([]), -1
 
-    reader, version = self._cache_manager.read(*labels)
-    header_serialized = next(reader)
-    header = TestStreamFileHeader()
-    header.ParseFromString(header_serialized)
-    return StreamingCache.Reader([header], [reader]).read(), version
+    reader = StreamingCacheSource(
+        self._cache_dir, labels,
+        is_cache_complete=self._is_cache_complete).read()
+    header = next(reader)
+    return StreamingCache.Reader([header], [reader]).read(), 1
 
   def read_multiple(self, labels):
-    readers = [self._cache_manager.read(l)[0] for l in labels]
-    headers = [TestStreamFileHeader() for r in readers]
-    for h, r in zip(headers, readers):
-      h.ParseFromString(next(r))
+    readers = [StreamingCacheSource(
+        self._cache_dir, l,
+        is_cache_complete=self._is_cache_complete).read() for l in labels]
+    headers = [next(r) for r in readers]
     return StreamingCache.Reader(headers, readers).read()
 
   def write(self, values, *labels):
     to_write = [v.SerializeToString() for v in values]
-    return self._cache_manager.write(to_write, *labels)
+    directory = os.path.join(self._cache_dir, *labels[:-1])
+    filepath = os.path.join(directory, labels[-1])
+    if not os.path.exists(directory):
+      os.makedirs(directory)
+    with open(filepath, 'ab') as f:
+      for line in to_write:
+        f.write(self._default_pcoder.encode(line))
+        f.write(b'\n')
 
   def source(self, *labels):
     return beam.Impulse()
 
   def sink(self, *labels):
-    return StreamingCacheSink(self._cache_manager.sink(*labels))
+    filename = labels[-1]
+    cache_dir = os.path.join(self._cache_dir, *labels[:-1])
+    return StreamingCacheSink(cache_dir, filename, self._sample_resolution_sec)
 
   def save_pcoder(self, pcoder, *labels):
-    self._cache_manager.save_pcoder(pcoder, *labels)
+    self._saved_pcoders[os.path.join(*labels)] = pcoder
 
   def load_pcoder(self, *labels):
-    return self._cache_manager.load_pcoder(*labels)
+    return (self._default_pcoder if self._default_pcoder is not None else
+            self._saved_pcoders[os.path.join(*labels)])
 
   def cleanup(self):
-    self._cache_manager.cleanup()
+    if os.path.exists(self._cache_dir):
+      shutil.rmtree(self._cache_dir)
+    self._saved_pcoders = {}
 
   class Reader(object):
     """Abstraction that reads from PCollection readers.
@@ -140,9 +284,7 @@ class StreamingCache(CacheManager):
         if self._stream_times[tag] >= target_timestamp:
           continue
         try:
-          record_serialized = next(r)
-          record = TestStreamFileRecord()
-          record.ParseFromString(record_serialized)
+          record = next(r)
           records.append((tag, record))
           self._stream_times[tag] = Timestamp.from_proto(record.processing_time)
         except StopIteration:

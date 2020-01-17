@@ -42,9 +42,9 @@ from __future__ import absolute_import
 import threading
 
 import apache_beam as beam
-from apache_beam.runners.runner import PipelineState
 from apache_beam.runners.interactive import interactive_environment as ie
 from apache_beam.runners.interactive.caching import streaming_cache
+from apache_beam.runners.runner import PipelineState
 
 
 class BackgroundCachingJob(object):
@@ -165,8 +165,17 @@ def has_source_to_cache(user_pipeline):
                       streaming_cache.StreamingCache):
       # Wrap the cache manager into a streaming cache manager. Note this
       # does not invalidate the current cache manager.
+      def is_cache_complete():
+        job = ie.current_env().get_background_caching_job(user_pipeline)
+        is_done = job and job.is_done()
+        cache_changed = is_source_to_cache_changed(
+            user_pipeline, update_cached_source_signature=False)
+        return is_done and not cache_changed
+
       ie.current_env().set_cache_manager(
-          streaming_cache.StreamingCache(ie.current_env().cache_manager()))
+          streaming_cache.StreamingCache(
+              ie.current_env().cache_manager()._cache_dir,
+              is_cache_complete=is_cache_complete))
   return has_cache
 
 
@@ -199,7 +208,8 @@ def is_a_test_stream_service_running(user_pipeline):
       user_pipeline) is not None
 
 
-def is_source_to_cache_changed(user_pipeline):
+def is_source_to_cache_changed(user_pipeline,
+                               update_cached_source_signature=True):
   """Determines if there is any change in the sources that need to be cached
   used by the user-defined pipeline.
 
@@ -219,9 +229,9 @@ def is_source_to_cache_changed(user_pipeline):
   is_changed = not current_signature.issubset(recorded_signature)
   # The computation of extract_unbounded_source_signature is expensive, track on
   # change by default.
-  if is_changed:
-    ie.current_env().set_cached_source_signature(
-        user_pipeline, current_signature)
+  if is_changed and (update_cached_source_signature or not recorded_signature):
+    ie.current_env().set_cached_source_signature(user_pipeline,
+                                                 current_signature)
   return is_changed
 
 

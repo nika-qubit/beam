@@ -32,7 +32,6 @@ from apache_beam.runners.interactive import interactive_runner
 from apache_beam.runners.interactive.caching.streaming_cache import StreamingCache
 from apache_beam.runners.interactive.testing.mock_ipython import mock_get_ipython
 from apache_beam.runners.interactive.testing.test_cache_manager import FileRecordsBuilder
-from apache_beam.runners.interactive.testing.test_cache_manager import InMemoryCache
 from apache_beam.testing.test_stream import TestStream
 from apache_beam.transforms.window import TimestampedValue
 
@@ -69,17 +68,17 @@ def _build_an_empty_stream_pipeline():
   return p
 
 def _setup_test_streaming_cache():
-  cache_manager = StreamingCache(InMemoryCache())
+  cache_manager = StreamingCache(cache_dir=None)
   ie.current_env().set_cache_manager(cache_manager)
   builder = FileRecordsBuilder(tag=_TEST_CACHE_KEY)
   (builder
-   .advance_watermark(watermark=0,
-                      processing_time=0)
+   .advance_watermark(watermark_secs=0,
+                      processing_time_secs=0)
    .add_element(element='a',
-                event_time=1,
-                processing_time=5)
-   .advance_watermark(watermark=100,
-                      processing_time=10))
+                event_time_secs=1,
+                processing_time_secs=5)
+   .advance_watermark(watermark_secs=100,
+                      processing_time_secs=10))
   cache_manager.write(builder.build(), _TEST_CACHE_KEY)
 
 
@@ -89,7 +88,7 @@ def _setup_test_streaming_cache():
 class BackgroundCachingJobTest(unittest.TestCase):
   def tearDown(self):
     for _, job in ie.current_env()._background_caching_jobs.items():
-        job.cancel()
+      job.cancel()
     ie.new_env()
 
   # TODO(BEAM-8335): remove the patches when there are appropriate test sources
@@ -143,7 +142,7 @@ class BackgroundCachingJobTest(unittest.TestCase):
          '.has_source_to_cache', lambda x: True)
   @patch('apache_beam.runners.interactive.pipeline_instrument'
          '.PipelineInstrument.streaming_cache_keys',
-         lambda x : (_TEST_CACHE_KEY,))
+         lambda x: (_TEST_CACHE_KEY,))
   # Disable the clean up so that we can keep the test streaming cache.
   @patch('apache_beam.runners.interactive.interactive_environment'
          '.InteractiveEnvironment.cleanup', lambda x: None)
