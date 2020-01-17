@@ -42,12 +42,12 @@ from apache_beam.transforms import PTransform
 from apache_beam.transforms import core
 from apache_beam.transforms import window
 from apache_beam.transforms.timeutil import TimeDomain
-from apache_beam.transforms.userstate import on_timer
 from apache_beam.transforms.userstate import TimerSpec
+from apache_beam.transforms.userstate import on_timer
 from apache_beam.transforms.window import TimestampedValue
+from apache_beam.utils import timestamp
 from apache_beam.utils.timestamp import MIN_TIMESTAMP
 from apache_beam.utils.timestamp import Duration
-from apache_beam.utils import timestamp
 from apache_beam.utils.windowed_value import WindowedValue
 
 __all__ = [
@@ -356,7 +356,8 @@ class _WatermarkEventGenerator(beam.DoFn):
       coder=beam.coders.FastPrimitivesCoder())
   WATERMARK_TRACKER = TimerSpec('watermark_tracker', TimeDomain.REAL_TIME)
 
-  def __init__(self, sample_resolution_sec=0.1):
+  def __init__(self, output_tag=None, sample_resolution_sec=0.1):
+    self._output_tag = output_tag
     self._sample_resolution_sec = sample_resolution_sec
 
   @on_timer(WATERMARK_TRACKER)
@@ -365,7 +366,7 @@ class _WatermarkEventGenerator(beam.DoFn):
       timestamp=beam.DoFn.TimestampParam,
       window=beam.DoFn.WindowParam,
       watermark_tracker=beam.DoFn.TimerParam(WATERMARK_TRACKER)):
-    next_sample_time = timestamp.micros / 1000000 + self._sample_resolution_sec
+    next_sample_time = (timestamp.micros * 1e-6) + self._sample_resolution_sec
     watermark_tracker.set(next_sample_time)
 
     # Generate two events, the delta since the last sample and a place-holder
@@ -386,9 +387,12 @@ class _WatermarkEventGenerator(beam.DoFn):
     if first_time:
       # Generate the initial timing events.
       execute_once_state.add(False)
-      now_sec = timing_info.processing_time.micros / 1000000
+      now_sec = timing_info.processing_time.micros * 1e-6
       watermark_tracker.set(now_sec + self._sample_resolution_sec)
-      yield TestStreamFileHeader()
+
+      # Here we capture the initial time offset and initial watermark. This is
+      # where we emit the TestStreamFileHeader.
+      yield TestStreamFileHeader(tag=self._output_tag)
       yield ProcessingTimeEvent(
           Duration(micros=timing_info.processing_time.micros))
       yield WatermarkEvent(MIN_TIMESTAMP)
@@ -412,7 +416,7 @@ class _TestStreamEventGenerator(beam.DoFn):
   def process(self, e, timestamp=beam.DoFn.TimestampParam):
     element, timing_info = e
     if isinstance(element, WatermarkEvent):
-      element.new_watermark = timing_info.watermark
+      element.new_watermark = timing_info.watermark.micros
       self.timing_events.append(element)
     elif isinstance(element, ProcessingTimeEvent):
       self.timing_events.append(element)
@@ -434,9 +438,9 @@ class _TestStreamFileRecordGenerator(beam.DoFn):
         if isinstance(e, WatermarkEvent):
           watermark_event = TestStreamPayload.Event.AdvanceWatermark(
               new_watermark=int(e.new_watermark))
-          processing_time = processing_time.to_proto()
+          processing_time_proto = processing_time.to_proto()
           record = TestStreamFileRecord(watermark_event=watermark_event,
-                                        processing_time=processing_time)
+                                        processing_time=processing_time_proto)
           yield WindowedValue(record, timestamp=0,
                               windows=[beam.window.GlobalWindow()])
 
@@ -444,7 +448,7 @@ class _TestStreamFileRecordGenerator(beam.DoFn):
       elements = []
       for tv, processing_time in self.elements:
         element_timestamp = tv.timestamp.micros
-        processing_time = processing_time.to_proto()
+        processing_time_proto = processing_time.to_proto()
         element = beam_runner_api_pb2.TestStreamPayload.TimestampedElement(
             encoded_element=self._coder.encode(tv.value),
             timestamp=element_timestamp)
@@ -452,7 +456,7 @@ class _TestStreamFileRecordGenerator(beam.DoFn):
 
       element_event = TestStreamPayload.Event.AddElements(elements=elements)
       record = TestStreamFileRecord(element_event=element_event,
-                                    processing_time=processing_time)
+                                    processing_time=processing_time_proto)
       yield WindowedValue(record, timestamp=0,
                           windows=[beam.window.GlobalWindow()])
 
@@ -460,7 +464,7 @@ class _TestStreamFileRecordGenerator(beam.DoFn):
     element, timing_info = e
 
     if isinstance(element, WatermarkEvent):
-      element.new_watermark = timing_info.watermark
+      element.new_watermark = timing_info.watermark.micros
       self.timing_events.append((element, timing_info.processing_time))
     elif isinstance(element, ProcessingTimeEvent):
       self.timing_events.append((element, timing_info.processing_time))
@@ -476,11 +480,12 @@ class ReverseTestStream(PTransform):
   EVENTS = 'events'
   SERIALIZED = 'serialized'
 
-  def __init__(self, sample_resolution_sec, coder=None, output_format=None):
+  def __init__(self, sample_resolution_sec, output_tag=None, coder=None,
+               output_format=None):
     self._sample_resolution_sec = sample_resolution_sec
-    self._output_format = output_format
-    self._coder = (coder if coder is not None
-                   else beam.coders.FastPrimitivesCoder())
+    self._output_tag = output_tag
+    self._output_format = output_format if output_format else self.EVENTS
+    self._coder = coder if coder else beam.coders.FastPrimitivesCoder()
 
   def expand(self, pcoll):
     generator = (_TestStreamFileRecordGenerator(coder=self._coder)
@@ -493,6 +498,7 @@ class ReverseTestStream(PTransform):
            | 'initial timing' >> _TimingInfoReporter()
            | beam.Map(lambda x: (0, x))
            | beam.ParDo(_WatermarkEventGenerator(
+               output_tag=self._output_tag,
                sample_resolution_sec=self._sample_resolution_sec))
            | 'timing info for watermarks' >> _TimingInfoReporter()
            | beam.ParDo(generator))
