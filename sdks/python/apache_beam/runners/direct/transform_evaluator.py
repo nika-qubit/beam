@@ -220,8 +220,14 @@ class _TestStreamRootBundleProvider(RootBundleProvider):
     test_stream = self._applied_ptransform.transform
     if self._evaluation_context._test_stream_event_stub:
       stub = self._evaluation_context._test_stream_event_stub
-      test_stream_event_channel = stub.Events(
-          beam_runner_api_pb2.EventsRequest(keys=list(test_stream.output_tags)))
+
+      if list(test_stream.output_tags) == [None]:
+        event_request = beam_runner_api_pb2.EventsRequest()
+      else:
+        event_request = beam_runner_api_pb2.EventsRequest(
+            keys=list(test_stream.output_tags))
+
+      test_stream_event_channel = stub.Events(event_request)
       self._evaluation_context._test_stream_event_channel = \
           test_stream_event_channel
 

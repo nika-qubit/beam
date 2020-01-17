@@ -30,13 +30,14 @@ import logging
 
 import apache_beam as beam
 from apache_beam import runners
+from apache_beam.options.pipeline_options import TestOptions
 from apache_beam.runners.direct import direct_runner
 from apache_beam.runners.interactive import cache_manager as cache
 from apache_beam.runners.interactive import interactive_environment as ie
 from apache_beam.runners.interactive import pipeline_instrument as inst
 from apache_beam.runners.interactive import background_caching_job
 from apache_beam.runners.interactive.display import pipeline_graph
-from apache_beam.testing import test_stream_service
+from apache_beam.testing.test_stream_service import TestStreamServiceController
 
 # size of PCollection samples cached.
 SAMPLE_SIZE = 8
@@ -157,12 +158,16 @@ class InteractiveRunner(runners.PipelineRunner):
               user_pipeline)):
         streaming_cache_manager = ie.current_env().cache_manager()
         if streaming_cache_manager:
-          reader = streaming_cache_manager.read_multiple(
-              pipeline_instrument.streaming_cache_keys())
-          controller = test_stream_service.TestStreamServiceController(reader)
-          ie.current_env().set_test_stream_service_controller(user_pipeline,
-                                                              controller)
-          controller.start()
+          test_stream_service = TestStreamServiceController(
+              streaming_cache_manager)
+          test_stream_service.start()
+          ie.current_env().set_test_stream_service_controller(
+              user_pipeline, test_stream_service)
+
+    if ie.current_env().get_test_stream_service_controller(user_pipeline):
+      endpoint = ie.current_env().get_test_stream_service_controller(
+          user_pipeline).endpoint
+      options.view_as(TestOptions).test_stream_service_endpoint = endpoint
 
     pipeline_to_execute = beam.pipeline.Pipeline.from_runner_api(
         pipeline_instrument.instrumented_pipeline_proto(),
