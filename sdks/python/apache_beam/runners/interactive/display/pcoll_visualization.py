@@ -82,7 +82,14 @@ _DATAFRAME_PAGINATION_TEMPLATE = """
             <script>
               $(document).ready(
                 function() {{
-                  $("#{table_id}").DataTable();
+                  $("#{table_id}").DataTable({{
+                    columnDefs: [
+                      {{
+                        targets: "_all",
+                        className: "dt-left"
+                      }}
+                    ]
+                  }});
                 }});
             </script>"""
 
@@ -216,13 +223,13 @@ class PCollectionVisualization(object):
     # materialized PCollection data might being updated continuously.
     data = self._to_dataframe()
     if updating_pv:
+      self._display_dataframe(data, updating_pv._df_display_id)
       self._display_dive(data, updating_pv._dive_display_id)
       self._display_overview(data, updating_pv._overview_display_id)
-      self._display_dataframe(data, updating_pv._df_display_id)
     else:
+      self._display_dataframe(data)
       self._display_dive(data)
       self._display_overview(data)
-      self._display_dataframe(data)
 
   def _display_dive(self, data, update=None):
     sprite_size = 32 if len(data.index) > 50000 else 64
