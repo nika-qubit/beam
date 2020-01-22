@@ -792,6 +792,33 @@ class ReverseTestStreamTest(unittest.TestCase):
 
     p.run()
 
+  def test_test_stream_encode_decode(self):
+    test_stream = (TestStream(output_tags=[None, 'a', 'b'])
+                   .advance_watermark_to(new_watermark=10, tag=None)
+                   .advance_watermark_to(new_watermark=10, tag='a')
+                   .advance_watermark_to(new_watermark=10, tag='b')
+                   .add_elements([TimestampedValue('1', 20),
+                                  TimestampedValue('2', 20)],
+                                 tag=None)
+                   .add_elements([TimestampedValue('3', 20),
+                                  TimestampedValue('4', 20)],
+                                 tag='a')
+                   .add_elements([TimestampedValue('5', 20),
+                                  TimestampedValue('6', 20)],
+                                 tag='b')
+                   .advance_processing_time(50))
+    p = beam.Pipeline()
+    p | test_stream
+
+    _, context = p.to_runner_api(return_context=True)
+    test_stream_proto = test_stream.to_runner_api(context)
+    test_stream_proto_roundtrip = \
+        TestStream.from_runner_api(test_stream_proto,
+                                   context).to_runner_api(context)
+    self.assertEqual(test_stream_proto, test_stream_proto_roundtrip)
+
+
+
 
 if __name__ == '__main__':
   unittest.main()

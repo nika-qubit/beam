@@ -525,6 +525,11 @@ message TestStreamPayload {
   // used to retrieve events.
   ApiServiceDescriptor endpoint = 3;
 
+  // (Optional) The PCollection tags this TestStream will be outputting to. If
+  // empty, this will assume it will be outputting to the single main
+  // output PCollection.
+  repeated string output_tags = 4;
+
   message Event {
     oneof event {
       AdvanceWatermark watermark_event = 1;

@@ -303,11 +303,14 @@ class TestStream(PTransform):
     return self
 
   def to_runner_api_parameter(self, context):
+    # Sort the output tags so that the order is deterministic and we are able
+    # to test equality on a roundtrip through the to/from proto apis.
     return (
         common_urns.primitives.TEST_STREAM.urn,
         beam_runner_api_pb2.TestStreamPayload(
             coder_id=context.coders.get_id(self.coder),
-            events=[e.to_runner_api(self.coder) for e in self._events]))
+            events=[e.to_runner_api(self.coder) for e in self._events],
+            output_tags=sorted(str(t) for t in self.output_tags)))
 
   @staticmethod
   @PTransform.register_urn(
@@ -317,7 +320,9 @@ class TestStream(PTransform):
     coder = context.coders.get_by_id(payload.coder_id)
     return TestStream(
         coder=coder,
-        events=[Event.from_runner_api(e, coder) for e in payload.events])
+        events=[Event.from_runner_api(e, coder) for e in payload.events],
+        output_tags=set(t if t != 'None' else None
+                        for t in payload.output_tags))
 
 
 class _TimingInfoReporter(PTransform):
