@@ -140,6 +140,7 @@ class InteractiveEnvironment(object):
     if self._is_in_ipython and not self._is_in_notebook:
       _LOGGER.warning('You have limited Interactive Beam features since your '
                       'ipython kernel is not connected any notebook frontend.')
+    self._inspector = None
 
   @property
   def is_py_version_ready(self):
@@ -165,10 +166,19 @@ class InteractiveEnvironment(object):
     """
     return self._is_in_notebook
 
+  def inspect(self):
+    if self.is_in_notebook:
+      if not self._inspector:
+        from apache_beam.runners.interactive.messaging.interactive_environment_inspector import InteractiveEnvironmentInspector
+        self._inspector = InteractiveEnvironmentInspector()
+      self._inspector.display()
+
   def cleanup(self):
     # Utilizes cache manager to clean up cache from everywhere.
     if self.cache_manager():
       self.cache_manager().cleanup()
+    if self.is_in_notebook and self._inspector:
+      self._inspector.close()
 
   def watch(self, watchable):
     """Watches a watchable.

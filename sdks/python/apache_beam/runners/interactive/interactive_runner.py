@@ -86,6 +86,7 @@ class InteractiveRunner(runners.PipelineRunner):
       ie.current_env().set_cache_manager(
           cache.FileBasedCacheManager(cache_dir,
                                       cache_format))
+    ie.current_env().inspect()
     self._cache_manager = ie.current_env().cache_manager()
     self._render_option = render_option
     self._in_session = False
