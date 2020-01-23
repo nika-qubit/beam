@@ -107,6 +107,11 @@ class BackgroundCachingJobTest(unittest.TestCase):
     p.run()
     self.assertIsNotNone(
         ie.current_env().get_background_caching_job(p))
+    expected_cached_source_signature = bcj.extract_source_to_cache_signature(p)
+    # This is to check whether the cached source signature is set correctly
+    # when the background caching job is started.
+    self.assertEqual(expected_cached_source_signature,
+                     ie.current_env().get_cached_source_signature(p))
 
   @patch('apache_beam.runners.interactive.background_caching_job'
          '.has_source_to_cache', lambda x: False)

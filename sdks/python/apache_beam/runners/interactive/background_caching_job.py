@@ -39,12 +39,15 @@ invalidated.
 
 from __future__ import absolute_import
 
+import logging
 import threading
 
 import apache_beam as beam
 from apache_beam.runners.interactive import interactive_environment as ie
 from apache_beam.runners.interactive.caching import streaming_cache
 from apache_beam.runners.runner import PipelineState
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class BackgroundCachingJob(object):
@@ -130,10 +133,18 @@ def attempt_to_run_background_caching_job(runner, user_pipeline, options=None):
 
 
 def is_background_caching_job_needed(user_pipeline):
-  """Determines if a background caching job needs to be started."""
+  """Determines if a background caching job needs to be started.
+
+  It does several state checks and record state changes throughout the process.
+  It is not idempotent to simplify the usage.
+  """
   job = ie.current_env().get_background_caching_job(user_pipeline)
   # Checks if the pipeline contains any source that needs to be cached.
-  return (has_source_to_cache(user_pipeline) and
+  need_cache = has_source_to_cache(user_pipeline)
+  # If this is True, we can invalidate a previous done/running job if there is
+  # one.
+  cache_changed = is_source_to_cache_changed(user_pipeline)
+  return (need_cache and
           # Checks if it's the first time running a job from the pipeline.
           (not job or
            # Or checks if there is no previous job.
@@ -144,7 +155,7 @@ def is_background_caching_job_needed(user_pipeline):
                 # running.
                 job.is_running()) or
            # Or checks if we can invalidate the previous job.
-           is_source_to_cache_changed(user_pipeline)))
+           cache_changed))
 
 
 def has_source_to_cache(user_pipeline):
@@ -155,6 +166,9 @@ def has_source_to_cache(user_pipeline):
 
   This can help determining if a background caching job is needed to write cache
   for sources and if a test stream service is needed to serve the cache.
+
+  Throughout the check, if source-to-cache has changed from the last check, it
+  also cleans up the invalidated cache early on.
   """
   from apache_beam.runners.interactive import pipeline_instrument as instr
   # TODO(BEAM-8335): we temporarily only cache replaceable unbounded sources.
@@ -229,9 +243,13 @@ def is_source_to_cache_changed(user_pipeline,
   is_changed = not current_signature.issubset(recorded_signature)
   # The computation of extract_unbounded_source_signature is expensive, track on
   # change by default.
-  if is_changed and (update_cached_source_signature or not recorded_signature):
+  if is_changed and update_cached_source_signature:
     ie.current_env().set_cached_source_signature(user_pipeline,
                                                  current_signature)
+    ie.current_env().cleanup()
+    _LOGGER.warning('New streaming source has been detected. Interactive Beam '
+                    'will capture new streaming data from all streaming '
+                    'sources and use them.')
   return is_changed
 
 
