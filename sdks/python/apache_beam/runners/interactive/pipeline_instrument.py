@@ -29,10 +29,10 @@ import apache_beam as beam
 from apache_beam.io.gcp.pubsub import ReadFromPubSub
 from apache_beam.pipeline import PipelineVisitor
 from apache_beam.portability.api import beam_runner_api_pb2
-from apache_beam.runners.interactive import background_caching_job
 from apache_beam.runners.interactive import cache_manager as cache
 from apache_beam.runners.interactive import interactive_environment as ie
 from apache_beam.runners.interactive import pipeline_fragment as pf
+from apache_beam.runners.interactive import background_caching_job
 from apache_beam.testing import test_stream
 
 READ_CACHE = "_ReadCache_"
@@ -108,6 +108,7 @@ class PipelineInstrument(object):
     # corresponding PCollections in the user pipeline instance. Populated
     # after preprocess().
     self._runner_pcoll_to_user_pcoll = {}
+    self._pruned_pipeline_proto = None
 
     # Refers target pcolls output by instrumented write cache transforms, used
     # by pruning logic as supplemental targets to build pipeline fragment up
@@ -131,17 +132,19 @@ class PipelineInstrument(object):
           use_fake_coders=True)
     return self._pipeline.to_runner_api(use_fake_coders=True)
 
-  def _required_components(self, pipeline_proto, required_transforms_ids):
+  def _required_components(self, pipeline_proto, required_transforms_ids,
+                           follow_outputs=False):
     """Returns the components and subcomponents of the given transforms.
 
     This method returns all the components (transforms, PCollections, coders,
     and windowing stratgies) related to the given transforms and to all of their
     subtransforms. This method accomplishes this recursively.
     """
+    if not required_transforms_ids:
+      return ({}, {})
+
     transforms = pipeline_proto.components.transforms
     pcollections = pipeline_proto.components.pcollections
-    coders = pipeline_proto.components.coders
-    windowing_strategies = pipeline_proto.components.windowing_strategies
 
     # Cache the transforms that will be copied into the new pipeline proto.
     required_transforms = {k: transforms[k] for k in required_transforms_ids}
@@ -155,47 +158,76 @@ class PipelineInstrument(object):
         for pc_id in pcollection_ids
     }
 
-    # Cache all the PCollection coders.
-    coder_ids = [pc.coder_id for pc in required_pcollections.values()]
-    required_coders = {c_id: coders[c_id] for c_id in coder_ids}
-
-    # Cache all the windowing strategy ids.
-    windowing_strategies_ids = [
-        pc.windowing_strategy_id for pc in required_pcollections.values()
-    ]
-    required_windowing_strategies = {
-        ws_id: windowing_strategies[ws_id]
-        for ws_id in windowing_strategies_ids
-    }
-
     subtransforms = {}
     subpcollections = {}
-    subcoders = {}
-    subwindowing_strategies = {}
 
     # Recursively go through all the subtransforms and add their components.
     for transform_id, transform in required_transforms.items():
       if transform_id in pipeline_proto.root_transform_ids:
         continue
-      (t, pc, c,
-       ws) = self._required_components(pipeline_proto, transform.subtransforms)
+      (t, pc) = self._required_components(pipeline_proto,
+                                          transform.subtransforms,
+                                          follow_outputs=False)
       subtransforms.update(t)
       subpcollections.update(pc)
-      subcoders.update(c)
-      subwindowing_strategies.update(ws)
+
+    if follow_outputs:
+      outputs = [pc_id for t in required_transforms.values()
+                 for pc_id in t.outputs.values()]
+      consuming_transforms = {t_id: t for t_id, t in transforms.items()
+                              if set(outputs).intersection(
+                                  set(t.inputs.values()))}
+      (t, pc) = self._required_components(pipeline_proto,
+                                          list(consuming_transforms.keys()),
+                                          follow_outputs)
+      subtransforms.update(t)
+      subpcollections.update(pc)
+
 
     # Now we got all the components and their subcomponents, so return the
     # complete collection.
     required_transforms.update(subtransforms)
     required_pcollections.update(subpcollections)
-    required_coders.update(subcoders)
-    required_windowing_strategies.update(subwindowing_strategies)
 
-    return (
-        required_transforms,
-        required_pcollections,
-        required_coders,
-        required_windowing_strategies)
+    return (required_transforms, required_pcollections)
+
+  def prune_subgraph_for(self, pipeline, required_transform_ids):
+    # Create the pipeline_proto to read all the components from. It will later
+    # create a new pipeline proto from the cut out components.
+    pipeline_proto, context = pipeline.to_runner_api(
+        return_context=True, use_fake_coders=False)
+
+    # Get all the root transforms. The caching transforms will be subtransforms
+    # of one of these roots.
+    roots = [root for root in pipeline_proto.root_transform_ids]
+
+    (t, p) = self._required_components(pipeline_proto,
+                                       roots + required_transform_ids,
+                                       follow_outputs=True)
+
+    def set_proto_map(proto_map, new_value):
+      proto_map.clear()
+      for key, value in new_value.items():
+        proto_map[key].CopyFrom(value)
+
+    # Copy the transforms into the new pipeline.
+    pipeline_to_execute = beam_runner_api_pb2.Pipeline()
+    pipeline_to_execute.root_transform_ids[:] = roots
+    set_proto_map(pipeline_to_execute.components.transforms, t)
+    set_proto_map(pipeline_to_execute.components.pcollections, p)
+    set_proto_map(pipeline_to_execute.components.coders,
+                  context.to_runner_api().coders)
+    set_proto_map(pipeline_to_execute.components.windowing_strategies,
+                  context.to_runner_api().windowing_strategies)
+
+    # Cut out all subtransforms in the root that aren't the required transforms.
+    for root_id in roots:
+      root = pipeline_to_execute.components.transforms[root_id]
+      root.subtransforms[:] = [
+          transform_id for transform_id in root.subtransforms
+          if transform_id in pipeline_to_execute.components.transforms]
+
+    return pipeline_to_execute
 
   def background_caching_pipeline_proto(self):
     """Returns the background caching pipeline.
@@ -236,10 +268,9 @@ class PipelineInstrument(object):
 
     # The required transforms are the tranforms that we want to cut out of
     # the pipeline_proto and insert into a new pipeline to return.
-    required_transform_ids = (
-        roots + caching_transform_ids + unbounded_source_ids)
-    (t, p, c,
-     w) = self._required_components(pipeline_proto, required_transform_ids)
+    required_transform_ids = (roots + caching_transform_ids +
+                              unbounded_source_ids)
+    (t, p) = self._required_components(pipeline_proto, required_transform_ids)
 
     def set_proto_map(proto_map, new_value):
       proto_map.clear()
@@ -253,7 +284,8 @@ class PipelineInstrument(object):
     set_proto_map(pipeline_to_execute.components.pcollections, p)
     set_proto_map(pipeline_to_execute.components.coders,
                   context.to_runner_api().coders)
-    set_proto_map(pipeline_to_execute.components.windowing_strategies, w)
+    set_proto_map(pipeline_to_execute.components.windowing_strategies,
+                  context.to_runner_api().windowing_strategies)
 
     # Cut out all subtransforms in the root that aren't the required transforms.
     for root_id in roots:
@@ -361,6 +393,7 @@ class PipelineInstrument(object):
                        cacheable_input in unbounded_source_pcolls)
     # Replace/wire inputs w/ cached PCollections from ReadCache transforms.
     self._replace_with_cached_inputs(self._pipeline)
+
     # Write cache for all cacheables.
     for _, cacheable in self.cacheables.items():
       self._write_cache(self._pipeline, cacheable['pcoll'])
@@ -371,6 +404,34 @@ class PipelineInstrument(object):
         self._write_cache(self._background_caching_pipeline,
                           source.outputs[None],
                           output_as_extended_target=False)
+
+      class TestStreamVisitor(PipelineVisitor):
+        def __init__(self):
+          self.test_stream = None
+
+        def enter_composite_transform(self, transform_node):
+          self.visit_transform(transform_node)
+
+        def visit_transform(self, transform_node):
+          if (self.test_stream is None and
+              isinstance(transform_node.transform, test_stream.TestStream)):
+            self.test_stream = transform_node.full_label
+
+      v = TestStreamVisitor()
+      self._pipeline.visit(v)
+      pipeline_proto = self._pipeline.to_runner_api(return_context=False,
+                                                    use_fake_coders=True)
+      test_stream_id = ''
+      for t_id, t in pipeline_proto.components.transforms.items():
+        if t.unique_name == v.test_stream:
+          test_stream_id = t_id
+          break
+      self._pruned_pipeline_proto = self.prune_subgraph_for(self._pipeline,
+                                                            [test_stream_id])
+      self._pipeline = beam.Pipeline.from_runner_api(
+          proto=self._pruned_pipeline_proto,
+          runner=self._pipeline.runner,
+          options=self._pipeline._options)
 
   def preprocess(self):
     """Pre-processes the pipeline.
@@ -463,7 +524,7 @@ class PipelineInstrument(object):
     is_computed = (pcoll in self._runner_pcoll_to_user_pcoll and
                    self._runner_pcoll_to_user_pcoll[pcoll] in
                    ie.current_env().computed_pcollections)
-    if (is_cached and (is_computed or is_unbounded_source_output)):
+    if ((is_cached and is_computed) or is_unbounded_source_output):
       if key not in self._cached_pcoll_read:
         # Mutates the pipeline with cache read transform attached
         # to root of the pipeline.
@@ -514,9 +575,10 @@ class PipelineInstrument(object):
     # replace the downstream consumer of the non-cached PCollections with these
     # PCollections.
     if output_tags:
-      output_pcolls = pipeline | test_stream.TestStream(output_tags=output_tags)
+      output_pcolls = pipeline | test_stream.TestStream(
+          output_tags=output_tags, coder=self._cache_manager._default_pcoder)
       if len(output_tags) == 1:
-        self._cached_pcoll_read[None] = output_pcolls
+        self._cached_pcoll_read[list(output_tags)[0]] = output_pcolls
       else:
         for tag, pcoll in output_pcolls.items():
           self._cached_pcoll_read[tag] = pcoll
