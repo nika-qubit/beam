@@ -215,6 +215,10 @@ class PipelineResult(beam.runners.runner.PipelineResult):
     self._underlying_result = underlying_result
     self._pipeline_instrument = pipeline_instrument
 
+  @property
+  def state(self):
+    return self._underlying_result.state
+
   def wait_until_finish(self):
     self._underlying_result.wait_until_finish()
 
