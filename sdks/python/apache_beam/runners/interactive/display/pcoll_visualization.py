@@ -32,6 +32,7 @@ from datetime import timedelta
 from pandas.io.json import json_normalize
 
 from apache_beam import pvalue
+from apache_beam.portability.api.beam_runner_api_pb2 import TestStreamPayload
 from apache_beam.runners.interactive import interactive_environment as ie
 from apache_beam.runners.interactive import pipeline_instrument as instr
 
@@ -306,11 +307,25 @@ class PCollectionVisualization(object):
     while True:
       try:
         el = next(element_list)
-        if self._is_one_dimension_type(el):
-          # Makes such data structured.
-          normalized_list.append({normalized_column: el})
+        parsed = []
+        if isinstance(el, TestStreamPayload.Event):
+          if (el.HasField('watermark_event') or
+              el.HasField('processing_time_event')):
+            continue
+          else:
+            cache = ie.current_env().cache_manager()
+            for tv in el.element_event.elements:
+              coder = cache.load_pcoder('full', self._cache_key)
+              parsed.append(coder.decode(tv.encoded_element))
         else:
-          normalized_list.append(jsons.load(jsons.dump(el)))
+          parsed.append(el)
+
+        for e in parsed:
+          if self._is_one_dimension_type(e):
+            # Makes such data structured.
+            normalized_list.append({normalized_column: e})
+          else:
+            normalized_list.append(jsons.load(jsons.dump(e)))
       except StopIteration:
         break
       except:

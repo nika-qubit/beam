@@ -30,6 +30,7 @@ import logging
 
 import apache_beam as beam
 from apache_beam import runners
+from apache_beam.portability.api.beam_runner_api_pb2 import TestStreamPayload
 from apache_beam.options.pipeline_options import TestOptions
 from apache_beam.runners.direct import direct_runner
 from apache_beam.runners.interactive import cache_manager as cache
@@ -224,9 +225,23 @@ class PipelineResult(beam.runners.runner.PipelineResult):
 
   def get(self, pcoll):
     key = self._pipeline_instrument.cache_key(pcoll)
-    if ie.current_env().cache_manager().exists('full', key):
-      pcoll_list, _ = ie.current_env().cache_manager().read('full', key)
-      return list(pcoll_list)
+    cache_manager = ie.current_env().cache_manager()
+    if cache_manager.exists('full', key):
+      pcoll_list, _ = cache_manager.read('full', key)
+      tmp_list = []
+      for e in pcoll_list:
+        if isinstance(e, TestStreamPayload.Event):
+            if (e.HasField('watermark_event') or
+                e.HasField('processing_time_event')):
+              continue
+            else:
+              for tv in e.element_event.elements:
+                coder = cache_manager.load_pcoder('full', key)
+                decoded = coder.decode(tv.encoded_element)
+                tmp_list.append(decoded)
+      if tmp_list:
+        pcoll_list = tmp_list
+      return pcoll_list
     else:
       raise ValueError('PCollection not available, please run the pipeline.')
 
