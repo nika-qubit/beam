@@ -26,6 +26,7 @@ from __future__ import absolute_import
 
 import base64
 import logging
+import sys
 from datetime import timedelta
 
 from pandas.io.json import json_normalize
@@ -51,6 +52,8 @@ try:
     _pcoll_visualization_ready = False
 except ImportError:
   _pcoll_visualization_ready = False
+
+_LOGGER = logging.getLogger(__name__)
 
 # 1-d types that need additional normalization to be compatible with DataFrame.
 _one_dimension_types = (int, float, str, bool, list, tuple)
@@ -223,10 +226,17 @@ class PCollectionVisualization(object):
     # materialized PCollection data might being updated continuously.
     data = self._to_dataframe()
     if updating_pv:
-      self._display_dataframe(data, updating_pv._df_display_id)
-      self._display_dive(data, updating_pv._dive_display_id)
-      self._display_overview(data, updating_pv._overview_display_id)
+      # Only updates when data is not empty. Otherwise, consider it a bad
+      # iteration and noop since there is nothing to be updated.
+      if data.empty:
+        _LOGGER.debug('Skip a visualization update due to empty data.')
+      else:
+        self._display_dataframe(data, updating_pv._df_display_id)
+        self._display_dive(data, updating_pv._dive_display_id)
+        self._display_overview(data, updating_pv._overview_display_id)
     else:
+      # Displays even if the data might be empty to create output anchors since
+      # this is the first iteration of a visualization.
       self._display_dataframe(data)
       self._display_dive(data)
       self._display_overview(data)
@@ -277,25 +287,40 @@ class PCollectionVisualization(object):
       display(HTML(html), display_id=self._df_display_id)
 
   def _to_element_list(self):
-    pcoll_list = []
-    if ie.current_env().cache_manager().exists('full', self._cache_key):
-      pcoll_list, _ = ie.current_env().cache_manager().read('full',
-                                                            self._cache_key)
+    pcoll_list = iter([])
+    try:
+      if ie.current_env().cache_manager().exists('full', self._cache_key):
+        pcoll_list, _ = ie.current_env().cache_manager().read('full',
+                                                              self._cache_key)
+    except:
+      _LOGGER.debug(sys.exc_info())
+      # If the read errors out for some reason, be resilient to it and return
+      # empty data.
+      pcoll_list = iter([])
     return pcoll_list
 
   def _to_dataframe(self):
+    jsons.suppress_warnings()
     normalized_list = []
     # Column name for _one_dimension_types if presents.
     normalized_column = str(self._pcoll)
+    element_list = self._to_element_list()
     # Normalization needs to be done for each element because they might be of
     # different types. The check is only done on the root level, pandas json
     # normalization I/O would take care of the nested levels.
-    for el in self._to_element_list():
-      if self._is_one_dimension_type(el):
-        # Makes such data structured.
-        normalized_list.append({normalized_column: el})
-      else:
-        normalized_list.append(jsons.load(jsons.dump(el)))
+    while True:
+      try:
+        el = next(element_list)
+        if self._is_one_dimension_type(el):
+          # Makes such data structured.
+          normalized_list.append({normalized_column: el})
+        else:
+          normalized_list.append(jsons.load(jsons.dump(el)))
+      except StopIteration:
+        break
+      except:
+        _LOGGER.debug(sys.exc_info())
+        continue
     # Creates a dataframe that str() 1-d iterable elements after
     # normalization so that facets_overview can treat such data as categorical.
     return json_normalize(normalized_list).applymap(
