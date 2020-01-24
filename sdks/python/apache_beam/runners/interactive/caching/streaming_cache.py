@@ -19,7 +19,6 @@
 
 from __future__ import absolute_import
 
-import datetime
 import itertools
 import os
 import shutil

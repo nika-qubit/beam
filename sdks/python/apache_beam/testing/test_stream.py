@@ -361,7 +361,7 @@ class _WatermarkEventGenerator(beam.DoFn):
       coder=beam.coders.FastPrimitivesCoder())
   WATERMARK_TRACKER = TimerSpec('watermark_tracker', TimeDomain.REAL_TIME)
 
-  def __init__(self, output_tag=None, sample_resolution_sec=0.1):
+  def __init__(self, output_tag, sample_resolution_sec=0.1):
     self._output_tag = output_tag
     self._sample_resolution_sec = sample_resolution_sec
 
@@ -485,7 +485,7 @@ class ReverseTestStream(PTransform):
   EVENTS = 'events'
   SERIALIZED = 'serialized'
 
-  def __init__(self, sample_resolution_sec, output_tag=None, coder=None,
+  def __init__(self, sample_resolution_sec, output_tag, coder=None,
                output_format=None):
     self._sample_resolution_sec = sample_resolution_sec
     self._output_tag = output_tag

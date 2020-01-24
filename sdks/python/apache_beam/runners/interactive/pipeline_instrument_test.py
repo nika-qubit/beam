@@ -26,7 +26,6 @@ import tempfile
 import unittest
 
 import apache_beam as beam
-import apache_beam.runners.interactive.cache_manager as cm
 from apache_beam import coders
 from apache_beam.pipeline import PipelineVisitor
 from apache_beam.portability.api.beam_runner_api_pb2 import TestStreamPayload
@@ -39,8 +38,9 @@ from apache_beam.runners.interactive.cache_manager import CacheManager
 from apache_beam.runners.interactive.caching import streaming_cache
 from apache_beam.runners.interactive.testing.pipeline_assertion import assert_pipeline_equal
 from apache_beam.runners.interactive.testing.pipeline_assertion import assert_pipeline_proto_contain_top_level_transform
-from apache_beam.runners.interactive.testing.pipeline_assertion import assert_pipeline_proto_not_contain_top_level_transform
 from apache_beam.runners.interactive.testing.pipeline_assertion import assert_pipeline_proto_equal
+from apache_beam.runners.interactive.testing.pipeline_assertion import \
+    assert_pipeline_proto_not_contain_top_level_transform
 from apache_beam.testing.test_stream import TestStream
 
 
@@ -443,7 +443,7 @@ class PipelineInstrumentTest(unittest.TestCase):
     # pylint: disable=expression-not-assigned
     (test_stream
      | 'square1' >> beam.Map(lambda x: x * x)
-     | cm.WriteCache(ie.current_env().cache_manager(), 'unused')
+     | cache.WriteCache(ie.current_env().cache_manager(), 'unused')
      )
 
     # Test that the TestStream is outputting to the correct PCollection.
