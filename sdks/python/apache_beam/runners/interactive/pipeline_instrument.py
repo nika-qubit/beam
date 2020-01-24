@@ -396,7 +396,8 @@ class PipelineInstrument(object):
 
     # Write cache for all cacheables.
     for _, cacheable in self.cacheables.items():
-      self._write_cache(self._pipeline, cacheable['pcoll'])
+      self._write_cache(self._pipeline, cacheable['pcoll'],
+                        ignore_unbounded_reads=True)
 
     # Instrument the background caching pipeline if we can.
     if self.has_unbounded_sources:
@@ -477,7 +478,8 @@ class PipelineInstrument(object):
     v = PreprocessVisitor(self)
     self._pipeline.visit(v)
 
-  def _write_cache(self, pipeline, pcoll, output_as_extended_target=True):
+  def _write_cache(self, pipeline, pcoll, output_as_extended_target=True,
+                   ignore_unbounded_reads=False):
     """Caches a cacheable PCollection.
 
     For the given PCollection, by appending sub transform part that materialize
@@ -493,6 +495,21 @@ class PipelineInstrument(object):
     # Makes sure the pcoll belongs to the pipeline being instrumented.
     if pcoll.pipeline is not pipeline:
       return
+
+    # Ignore the unbounded reads from REPLACEABLE_UNBOUNDED_SOURCES as these
+    # will be pruned out using the PipelineFragment later on.
+    if ignore_unbounded_reads:
+      ignore = False
+      producer = pcoll.producer
+      while producer:
+        if isinstance(producer.transform, REPLACEABLE_UNBOUNDED_SOURCES):
+          ignore = True
+          break
+        producer = producer.parent
+      if ignore:
+        self._ignored_targets.add(pcoll)
+        return
+
     # The keyed cache is always valid within this instrumentation.
     key = self.cache_key(pcoll)
     # Only need to write when the cache with expected key doesn't exist.
