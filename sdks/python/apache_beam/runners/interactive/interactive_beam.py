@@ -150,7 +150,7 @@ def show(*pcolls):
   # arbitrary variables.
   watched_pcollections = set()
   for watching in ie.current_env().watching():
-    for val in watching.values():
+    for _, val in watching:
       if hasattr(val, '__class__') and isinstance(val, beam.pvalue.PCollection):
         watched_pcollections.add(val)
   for pcoll in pcolls:
