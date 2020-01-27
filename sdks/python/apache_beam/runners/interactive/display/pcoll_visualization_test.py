@@ -81,10 +81,12 @@ class PCollectionVisualizationTest(unittest.TestCase):
     self.assertNotEqual(pv_1._df_display_id, pv_2._df_display_id)
 
   def test_one_shot_visualization_not_return_handle(self):
-    self.assertIsNone(pv.visualize(self._pcoll))
+    self.assertIsNone(pv.visualize(self._pcoll, display_facets=True))
 
   def test_dynamic_plotting_return_handle(self):
-    h = pv.visualize(self._pcoll, dynamic_plotting_interval=1)
+    h = pv.visualize(self._pcoll,
+                     dynamic_plotting_interval=1,
+                     display_facets=True)
     self.assertIsInstance(h, timeloop.Timeloop)
     h.stop()
 
@@ -103,19 +105,28 @@ class PCollectionVisualizationTest(unittest.TestCase):
       mocked_display_overview,
       mocked_display_dive):
     original_pcollection_visualization = pv.PCollectionVisualization(
-        self._pcoll)
+        self._pcoll, display_facets=True)
+    # When not updating, facets widgets are rendered. It will use the same id
+    # for updating forever.
+    original_pcollection_visualization.display()
+    mocked_display_dataframe.assert_called_once_with(ANY)
+    mocked_display_overview.assert_called_once_with(ANY)
+    mocked_display_dive.assert_called_once_with(ANY)
     # Dynamic plotting always creates a new PCollectionVisualization.
-    new_pcollection_visualization = pv.PCollectionVisualization(self._pcoll)
+    new_pcollection_visualization = pv.PCollectionVisualization(
+        self._pcoll, display_facets=True)
     # The display uses ANY data the moment display is invoked, and updates
     # web elements with ids fetched from the given updating_pv.
-    new_pcollection_visualization.display_facets(
+    new_pcollection_visualization.display(
         updating_pv=original_pcollection_visualization)
-    mocked_display_dataframe.assert_called_once_with(
+    # When updating, only dataframe gets updated due to the other facets
+    # widgets are self-contained because their rendering can be toggled on
+    # demand.
+    mocked_display_dataframe.assert_called_with(
         ANY, original_pcollection_visualization._df_display_id)
-    mocked_display_overview.assert_called_once_with(
-        ANY, original_pcollection_visualization._overview_display_id)
-    mocked_display_dive.assert_called_once_with(
-        ANY, original_pcollection_visualization._dive_display_id)
+    # Below assertions are still true without newer calls.
+    mocked_display_overview.assert_called_once_with(ANY)
+    mocked_display_dive.assert_called_once_with(ANY)
 
   def test_auto_stop_dynamic_plotting_when_job_is_terminated(self):
     fake_pipeline_result = runner.PipelineResult(runner.PipelineState.RUNNING)
@@ -137,7 +148,7 @@ class PCollectionVisualizationTest(unittest.TestCase):
                                                           _mocked_head):
     # Resets the notebook check to False.
     ie.current_env()._is_in_notebook = False
-    self.assertIsNone(pv.visualize(self._pcoll))
+    self.assertIsNone(pv.visualize(self._pcoll, display_facets=True))
     _mocked_head.assert_called_once()
 
 
