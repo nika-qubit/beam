@@ -58,7 +58,7 @@ class InteractiveRunner(runners.PipelineRunner):
                cache_dir=None,
                cache_format='text',
                render_option=None,
-               skip_display=False,
+               skip_display=True,
                force_compute=True,
                blocking=True):
     """Constructor of InteractiveRunner.
