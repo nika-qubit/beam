@@ -231,7 +231,7 @@ class PipelineResult(beam.runners.runner.PipelineResult):
     cache_manager = ie.current_env().cache_manager()
     if cache_manager.exists('full', key):
       pcoll_list, _ = cache_manager.read('full', key)
-      tmp_list = []
+      results = []
       for e in pcoll_list:
         if isinstance(e, TestStreamPayload.Event):
             if (e.HasField('watermark_event') or
@@ -241,10 +241,10 @@ class PipelineResult(beam.runners.runner.PipelineResult):
               for tv in e.element_event.elements:
                 coder = cache_manager.load_pcoder('full', key)
                 decoded = coder.decode(tv.encoded_element)
-                tmp_list.append(decoded)
-      if tmp_list:
-        pcoll_list = tmp_list
-      return pcoll_list
+                results.append(decoded)
+        else:
+          results.append(e)
+      return results
     else:
       raise ValueError('PCollection not available, please run the pipeline.')
 
