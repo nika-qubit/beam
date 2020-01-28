@@ -287,7 +287,8 @@ class PCollectionVisualization(object):
     try:
       if ie.current_env().cache_manager().exists('full', self._cache_key):
         pcoll_list, _ = ie.current_env().cache_manager().read('full',
-                                                              self._cache_key)
+                                                              self._cache_key,
+                                                              tail=False)
     except:
       _LOGGER.debug(sys.exc_info())
       # If the read errors out for some reason, be resilient to it and return

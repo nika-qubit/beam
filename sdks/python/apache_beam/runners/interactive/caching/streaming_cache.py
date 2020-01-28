@@ -102,7 +102,7 @@ class StreamingCacheSource:
       now_secs = time.time()
       try:
         path = os.path.join(self._cache_dir, *self._labels)
-        f = open(path)
+        f = open(path, mode='r')
       except EnvironmentError as e:
         # For Python2 and Python3 compatibility, this checks the
         # EnvironmentError to see if the file exists.
@@ -118,7 +118,7 @@ class StreamingCacheSource:
           "Timed out waiting for file '{}' to be available".format(path))
     return f
 
-  def _emit_from_file(self, fh):
+  def _emit_from_file(self, fh, tail):
     # Always read at least once to read the whole file.
     while True:
       pos = fh.tell()
@@ -128,6 +128,9 @@ class StreamingCacheSource:
       if not line:
         # Complete reading only when the cache is complete.
         if self._is_cache_complete():
+          break
+
+        if not tail:
           break
 
         # Otherwise wait for new data in the file to be written.
@@ -145,10 +148,10 @@ class StreamingCacheSource:
           record.ParseFromString(self._coder.decode(line[:-1]))
           yield record
 
-  def read(self):
+  def read(self, tail):
     try:
       f = self._wait_until_file_exists()
-      for e in self._emit_from_file(f):
+      for e in self._emit_from_file(f, tail):
         yield e
     finally:
       f.close()
@@ -186,20 +189,20 @@ class StreamingCache(CacheManager):
     return os.path.exists(path)
 
   # TODO(srohde): Modify this to return the correct version.
-  def read(self, *labels):
+  def read(self, *labels, tail=True):
     if not self.exists(*labels):
       return itertools.chain([]), -1
 
     reader = StreamingCacheSource(
         self._cache_dir, labels,
-        is_cache_complete=self._is_cache_complete).read()
+        is_cache_complete=self._is_cache_complete).read(tail)
     header = next(reader)
     return StreamingCache.Reader([header], [reader]).read(), 1
 
-  def read_multiple(self, labels):
+  def read_multiple(self, labels, tail=True):
     readers = [StreamingCacheSource(
         self._cache_dir, l,
-        is_cache_complete=self._is_cache_complete).read() for l in labels]
+        is_cache_complete=self._is_cache_complete).read(tail) for l in labels]
     headers = [next(r) for r in readers]
     return StreamingCache.Reader(headers, readers).read()
 
