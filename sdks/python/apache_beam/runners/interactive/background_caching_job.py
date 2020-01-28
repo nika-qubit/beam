@@ -190,7 +190,8 @@ def has_source_to_cache(user_pipeline):
       ie.current_env().set_cache_manager(
           streaming_cache.StreamingCache(
               ie.current_env().cache_manager()._cache_dir,
-              is_cache_complete=is_cache_complete))
+              is_cache_complete=is_cache_complete,
+              sample_resolution_sec=1.0))
   return has_cache
 
 
