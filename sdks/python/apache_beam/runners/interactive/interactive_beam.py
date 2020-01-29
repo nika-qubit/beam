@@ -292,4 +292,5 @@ def head(pcoll, n=5):
 def show_graph(pipeline):
   """Shows the current pipeline shape of a given Beam pipeline as a DAG.
   """
-  pipeline_graph.PipelineGraph(pipeline).display_graph()
+  pipeline_graph.PipelineGraph(pipeline).display_graph(
+      enable_toggle=False)

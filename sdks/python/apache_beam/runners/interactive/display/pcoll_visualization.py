@@ -281,10 +281,10 @@ class PCollectionVisualization(object):
 
   def _display_facets_toggle(self, data):
     w_toggle = widgets.Button(
-        description='Explore Data',
+        description='Visualize Data',
         disabled=False,
         button_style='info',
-        tooltip='Explore the data and its statistics interactively.')
+        tooltip='Visualize the data and its statistics interactively.')
     w_output = widgets.Output()
 
     def on_toggle_click(unused_event):
@@ -299,9 +299,10 @@ class PCollectionVisualization(object):
           # The job can only be stopped once. Ignore excessive stops.
           pass
         finally:
-          w_toggle.description = 'Explore Data'
+          w_toggle.description = 'Visualize Data'
           w_toggle.button_style = 'info'
-          w_toggle.tooltip = 'Explore the data and its statistics interactively.'
+          w_toggle.tooltip = ('Visualize the data and its statistics'
+                              ' interactively.')
           with w_output:
             w_output.clear_output()
           self._dynamic_facets_handle = None
@@ -309,9 +310,9 @@ class PCollectionVisualization(object):
       # On click, if the facets are not displayed, the branch should make it
       # displayed by invoking the rendering logic.
       else:
-        w_toggle.description = 'Hide Data Exploration'
+        w_toggle.description = 'Hide Data Visualization'
         w_toggle.button_style = 'success'
-        w_toggle.tooltip = 'Stop exploring the data interactively.'
+        w_toggle.tooltip = 'Stop visualizing the data interactively.'
         with w_output:
           w_output.clear_output()
           self._dynamic_facets_handle = self._display_facets(data)
