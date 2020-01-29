@@ -538,7 +538,6 @@ class PipelineInstrument(object):
     key = self.cache_key(pcoll)
     # Can only read from cache when the cache with expected key exists and its
     # computation has been completed.
-
     is_cached = self._cache_manager.exists('full', key)
     is_computed = (pcoll in self._runner_pcoll_to_user_pcoll and
                    self._runner_pcoll_to_user_pcoll[pcoll] in
