@@ -57,7 +57,7 @@ class InteractiveRunner(runners.PipelineRunner):
                cache_dir=None,
                cache_format='text',
                render_option=None,
-               skip_display=True,
+               skip_display=False,
                force_compute=True,
                blocking=True):
     """Constructor of InteractiveRunner.
@@ -71,7 +71,8 @@ class InteractiveRunner(runners.PipelineRunner):
           rendered. See display.pipeline_graph_renderer for available options.
       skip_display: (bool) whether to skip display operations when running the
           pipeline. Useful if running large pipelines when display is not
-          needed.
+          needed. When it's False, a toggle button is available to show/hide
+          rendering of pipeline graphs; otherwise, nothing is displayed.
       force_compute: (bool) whether sequential pipeline runs can use cached data
           of PCollections computed from the previous runs including show API
           invocation from interactive_beam module. If True, always run the whole
