@@ -38,8 +38,8 @@ class TestStreamServiceController(TestStreamServiceServicer):
       self.endpoint = endpoint
       self._server.add_insecure_port(self.endpoint)
     else:
-      port = self._server.add_insecure_port('[::]:0')
-      self.endpoint = '[::]:{}'.format(port)
+      port = self._server.add_insecure_port('localhost:0')
+      self.endpoint = 'localhost:{}'.format(port)
 
     beam_runner_api_pb2_grpc.add_TestStreamServiceServicer_to_server(
         self, self._server)
