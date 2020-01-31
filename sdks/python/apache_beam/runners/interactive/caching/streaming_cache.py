@@ -149,12 +149,9 @@ class StreamingCacheSource:
           yield record
 
   def read(self, tail):
-    try:
-      f = self._wait_until_file_exists()
+    with self._wait_until_file_exists() as f:
       for e in self._emit_from_file(f, tail):
         yield e
-    finally:
-      f.close()
 
 
 class StreamingCache(CacheManager):
