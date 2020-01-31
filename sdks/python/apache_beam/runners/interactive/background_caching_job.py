@@ -252,9 +252,11 @@ def is_source_to_cache_changed(user_pipeline,
                    'of your pipeline, a 60s segment will be recorded from '
                    'each of your sources.')
     else:
-      _LOGGER.info('New streaming source has been detected. Interactive '
-                   'Beam will capture new streaming data from all streaming '
-                   'sources and use them.')
+      _LOGGER.info('Interactive Beam has detected a new streaming source was '
+                   'added to the pipeline. In order for the cached streaming '
+                   'data to start at the same time, all caches have been '
+                   'cleared. A new 60s segment will be recorded from each of '
+                   'your sources.')
 
     ie.current_env().set_cached_source_signature(user_pipeline,
                                                  current_signature)

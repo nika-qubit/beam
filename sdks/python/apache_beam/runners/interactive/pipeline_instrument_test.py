@@ -402,6 +402,242 @@ class PipelineInstrumentTest(unittest.TestCase):
                                 p_expected.to_runner_api(),
                                 instrumenter.instrumented_pipeline_proto())
 
+  def test_able_to_cache_intermediate_unbounded_source_pcollection(self):
+    """Tests that we are able to cache PCollection an intermediate source PColl.
+
+    In the following pipeline, the source doesn't have a reference and so is
+    not automatically cached in the watch() command. This tests that this case
+    is taken care of.
+    """
+    # Create a new interactive environment to make the test idempotent.
+    ie.new_env(cache_manager=streaming_cache.StreamingCache(cache_dir=None))
+
+    # Create the pipeline that will be instrumented.
+    from apache_beam.options.pipeline_options import StandardOptions
+    options = StandardOptions(streaming=True)
+    p_original = beam.Pipeline(interactive_runner.InteractiveRunner(), options)
+
+    # pylint: disable=possibly-unused-variable
+    source_1 = (p_original
+                | 'source1' >> beam.io.ReadFromPubSub(
+                    subscription='projects/fake-project/subscriptions/fake_sub')
+                | beam.Map(lambda e: e))
+
+    # Watch but do not cache the PCollections.
+    ib.watch(locals())
+    def cache_key_of(name, pcoll):
+      return name + '_' + str(id(pcoll)) + '_' + str(id(pcoll.producer))
+
+    # Make sure that sources without a user reference are still cached.
+    instr.watch_sources(p_original)
+
+    intermediate_source_pcoll = None
+    for watching in ie.current_env().watching():
+      watching = list(watching)
+      for var, watchable in watching:
+        if 'synthetic' in var:
+          intermediate_source_pcoll = watchable
+          break
+
+    # Instrument the original pipeline to create the pipeline the user will see.
+    p_copy = beam.Pipeline.from_runner_api(
+        p_original.to_runner_api(),
+        runner=interactive_runner.InteractiveRunner(),
+        options=options)
+    instrumenter = instr.build_pipeline_instrument(p_copy)
+    actual_pipeline = beam.Pipeline.from_runner_api(
+        proto=instrumenter.instrumented_pipeline_proto(),
+        runner=interactive_runner.InteractiveRunner(),
+        options=options)
+
+    # Now, build the expected pipeline which replaces the unbounded source with
+    # a TestStream.
+    intermediate_source_pcoll_cache_key = \
+        cache_key_of('synthetic_var_' + str(id(intermediate_source_pcoll)),
+                     intermediate_source_pcoll)
+    p_expected = beam.Pipeline()
+
+    test_stream = (p_expected
+                   | TestStream(
+                       output_tags=[intermediate_source_pcoll_cache_key]))
+    # pylint: disable=expression-not-assigned
+    (test_stream
+     | 'square1' >> beam.Map(lambda e: e)
+     | cache.WriteCache(ie.current_env().cache_manager(), 'unused')
+     )
+
+    # Test that the TestStream is outputting to the correct PCollection.
+    class TestStreamVisitor(PipelineVisitor):
+      def __init__(self):
+        self.output_tags = set()
+
+      def enter_composite_transform(self, transform_node):
+        self.visit_transform(transform_node)
+
+      def visit_transform(self, transform_node):
+        transform = transform_node.transform
+        if isinstance(transform, TestStream):
+          self.output_tags = transform.output_tags
+
+    v = TestStreamVisitor()
+    actual_pipeline.visit(v)
+    expected_output_tags = set([intermediate_source_pcoll_cache_key])
+    actual_output_tags = v.output_tags
+    self.assertSetEqual(expected_output_tags, actual_output_tags)
+
+    # Test that the pipeline is as expected.
+    assert_pipeline_proto_equal(self,
+                                p_expected.to_runner_api(use_fake_coders=True),
+                                instrumenter.instrumented_pipeline_proto())
+
+
+  def test_instrument_mixed_streaming_batch(self):
+    """Tests caching for both batch and streaming sources in the same pipeline.
+
+    This ensures that cached bounded and unbounded sources are read from the
+    TestStream.
+    """
+    # Create a new interactive environment to make the test idempotent.
+    ie.new_env(cache_manager=streaming_cache.StreamingCache(cache_dir=None))
+
+    # Create the pipeline that will be instrumented.
+    from apache_beam.options.pipeline_options import StandardOptions
+    options = StandardOptions(streaming=True)
+    p_original = beam.Pipeline(interactive_runner.InteractiveRunner(), options)
+    source_1 = p_original | 'source1' >> beam.io.ReadFromPubSub(
+        subscription='projects/fake-project/subscriptions/fake_sub')
+    source_2 = p_original | 'source2' >> beam.Create([1, 2, 3, 4, 5])
+
+    # pylint: disable=possibly-unused-variable
+    pcoll_1 = ((source_1, source_2)
+               | beam.Flatten()
+               | 'square1' >> beam.Map(lambda x: x * x))
+
+    # Watch but do not cache the PCollections.
+    ib.watch(locals())
+    def cache_key_of(name, pcoll):
+      return name + '_' + str(id(pcoll)) + '_' + str(id(pcoll.producer))
+
+    self._mock_write_cache([TestStreamPayload()],
+                           cache_key_of('source_2', source_2))
+    ie.current_env().mark_pcollection_computed([source_2])
+
+    # Instrument the original pipeline to create the pipeline the user will see.
+    p_copy = beam.Pipeline.from_runner_api(
+        p_original.to_runner_api(),
+        runner=interactive_runner.InteractiveRunner(),
+        options=options)
+    instrumenter = instr.build_pipeline_instrument(p_copy)
+    actual_pipeline = beam.Pipeline.from_runner_api(
+        proto=instrumenter.instrumented_pipeline_proto(),
+        runner=interactive_runner.InteractiveRunner(),
+        options=options)
+
+    # Now, build the expected pipeline which replaces the unbounded source with
+    # a TestStream.
+    source_1_cache_key = cache_key_of('source_1', source_1)
+    source_2_cache_key = cache_key_of('source_2', source_2)
+    p_expected = beam.Pipeline()
+
+    test_stream = (p_expected
+                   | TestStream(output_tags=[source_1_cache_key,
+                                             source_2_cache_key]))
+    # pylint: disable=expression-not-assigned
+    ((test_stream[cache_key_of('source_1', source_1)],
+      test_stream[cache_key_of('source_2', source_2)])
+     | beam.Flatten()
+     | 'square1' >> beam.Map(lambda x: x * x)
+     | cache.WriteCache(ie.current_env().cache_manager(), 'unused')
+     )
+
+    # Test that the TestStream is outputting to the correct PCollection.
+    class TestStreamVisitor(PipelineVisitor):
+      def __init__(self):
+        self.output_tags = set()
+
+      def enter_composite_transform(self, transform_node):
+        self.visit_transform(transform_node)
+
+      def visit_transform(self, transform_node):
+        transform = transform_node.transform
+        if isinstance(transform, TestStream):
+          self.output_tags = transform.output_tags
+
+    v = TestStreamVisitor()
+    actual_pipeline.visit(v)
+    expected_output_tags = set([source_1_cache_key, source_2_cache_key])
+    actual_output_tags = v.output_tags
+    self.assertSetEqual(expected_output_tags, actual_output_tags)
+
+    # Test that the pipeline is as expected.
+    assert_pipeline_proto_equal(self,
+                                p_expected.to_runner_api(use_fake_coders=True),
+                                instrumenter.instrumented_pipeline_proto())
+
+  def test_instrument_example_unbounded_pipeline_direct_from_source(self):
+    """Tests that the it caches PCollections from a source.
+    """
+    # Create a new interactive environment to make the test idempotent.
+    ie.new_env(cache_manager=streaming_cache.StreamingCache(cache_dir=None))
+
+    # Create the pipeline that will be instrumented.
+    from apache_beam.options.pipeline_options import StandardOptions
+    options = StandardOptions(streaming=True)
+    p_original = beam.Pipeline(interactive_runner.InteractiveRunner(), options)
+    source_1 = p_original | 'source1' >> beam.io.ReadFromPubSub(
+        subscription='projects/fake-project/subscriptions/fake_sub')
+    # pylint: disable=possibly-unused-variable
+
+    # Watch but do not cache the PCollections.
+    ib.watch(locals())
+    def cache_key_of(name, pcoll):
+      return name + '_' + str(id(pcoll)) + '_' + str(id(pcoll.producer))
+
+    # Instrument the original pipeline to create the pipeline the user will see.
+    p_copy = beam.Pipeline.from_runner_api(
+        p_original.to_runner_api(),
+        runner=interactive_runner.InteractiveRunner(),
+        options=options)
+    instrumenter = instr.build_pipeline_instrument(p_copy)
+    actual_pipeline = beam.Pipeline.from_runner_api(
+        proto=instrumenter.instrumented_pipeline_proto(),
+        runner=interactive_runner.InteractiveRunner(),
+        options=options)
+
+    # Now, build the expected pipeline which replaces the unbounded source with
+    # a TestStream.
+    source_1_cache_key = cache_key_of('source_1', source_1)
+    p_expected = beam.Pipeline()
+
+    # pylint: disable=unused-variable
+    test_stream = (p_expected
+                   | TestStream(output_tags=[
+                       cache_key_of('source_1', source_1)]))
+
+    # Test that the TestStream is outputting to the correct PCollection.
+    class TestStreamVisitor(PipelineVisitor):
+      def __init__(self):
+        self.output_tags = set()
+
+      def enter_composite_transform(self, transform_node):
+        self.visit_transform(transform_node)
+
+      def visit_transform(self, transform_node):
+        transform = transform_node.transform
+        if isinstance(transform, TestStream):
+          self.output_tags = transform.output_tags
+
+    v = TestStreamVisitor()
+    actual_pipeline.visit(v)
+    expected_output_tags = set([source_1_cache_key])
+    actual_output_tags = v.output_tags
+    self.assertSetEqual(expected_output_tags, actual_output_tags)
+
+    # Test that the pipeline is as expected.
+    assert_pipeline_proto_equal(self,
+                                p_expected.to_runner_api(use_fake_coders=True),
+                                instrumenter.instrumented_pipeline_proto())
+
   def test_instrument_example_unbounded_pipeline_to_read_cache_not_cached(self):
     """Tests that the instrumenter works when the PCollection is not cached.
     """

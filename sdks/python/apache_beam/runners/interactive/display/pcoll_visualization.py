@@ -335,6 +335,8 @@ class PCollectionVisualization(object):
       # Disables the verbose logging from timeloop.
       logging.getLogger('timeloop').disabled = True
       tl = Timeloop()
+
+      # pylint: disable=unused-variable
       @tl.job(interval=timedelta(seconds=self._dynamic_plotting_interval))
       def facets_only_dynamic_plotting():
         updated_pv = PCollectionVisualization(self._pcoll)
@@ -398,6 +400,7 @@ class PCollectionVisualization(object):
         pcoll_list, _ = ie.current_env().cache_manager().read('full',
                                                               self._cache_key,
                                                               tail=False)
+    # pylint: disable=bare-except
     except:
       _LOGGER.debug(sys.exc_info())
       # If the read errors out for some reason, be resilient to it and return
@@ -415,6 +418,7 @@ class PCollectionVisualization(object):
     # different types. The check is only done on the root level, pandas json
     # normalization I/O would take care of the nested levels.
     while True:
+      # pylint: disable=bare-except
       try:
         el = next(element_list)
         parsed = []
@@ -438,6 +442,7 @@ class PCollectionVisualization(object):
             normalized_list.append(jsons.load(jsons.dump(e)))
       except StopIteration:
         break
+
       except:
         _LOGGER.debug(sys.exc_info())
         continue

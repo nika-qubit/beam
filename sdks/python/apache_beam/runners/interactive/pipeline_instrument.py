@@ -133,7 +133,9 @@ class PipelineInstrument(object):
     return self._pipeline.to_runner_api(use_fake_coders=True)
 
   def _required_components(self, pipeline_proto, required_transforms_ids,
-                           follow_outputs=False):
+                           visited,
+                           follow_outputs=False,
+                           follow_inputs=False):
     """Returns the components and subcomponents of the given transforms.
 
     This method returns all the components (transforms, PCollections, coders,
@@ -167,19 +169,41 @@ class PipelineInstrument(object):
         continue
       (t, pc) = self._required_components(pipeline_proto,
                                           transform.subtransforms,
-                                          follow_outputs=False)
+                                          visited,
+                                          follow_outputs=False,
+                                          follow_inputs=False)
       subtransforms.update(t)
       subpcollections.update(pc)
 
     if follow_outputs:
       outputs = [pc_id for t in required_transforms.values()
                  for pc_id in t.outputs.values()]
+      visited_copy = visited.copy()
       consuming_transforms = {t_id: t for t_id, t in transforms.items()
                               if set(outputs).intersection(
                                   set(t.inputs.values()))}
+      consuming_transforms = set(consuming_transforms.keys())
+      visited.update(consuming_transforms)
+      consuming_transforms = consuming_transforms - visited_copy
       (t, pc) = self._required_components(pipeline_proto,
-                                          list(consuming_transforms.keys()),
-                                          follow_outputs)
+                                          list(consuming_transforms),
+                                          visited,
+                                          follow_outputs,
+                                          follow_inputs)
+      subtransforms.update(t)
+      subpcollections.update(pc)
+
+    if follow_inputs:
+      inputs = [pc_id for t in required_transforms.values()
+                for pc_id in t.inputs.values()]
+      producing_transforms = {t_id: t for t_id, t in transforms.items()
+                              if set(inputs).intersection(
+                                  set(t.outputs.values()))}
+      (t, pc) = self._required_components(pipeline_proto,
+                                          list(producing_transforms.keys()),
+                                          visited,
+                                          follow_outputs,
+                                          follow_inputs)
       subtransforms.update(t)
       subpcollections.update(pc)
 
@@ -203,7 +227,9 @@ class PipelineInstrument(object):
 
     (t, p) = self._required_components(pipeline_proto,
                                        roots + required_transform_ids,
-                                       follow_outputs=True)
+                                       set(),
+                                       follow_outputs=True,
+                                       follow_inputs=True)
 
     def set_proto_map(proto_map, new_value):
       proto_map.clear()
@@ -270,7 +296,8 @@ class PipelineInstrument(object):
     # the pipeline_proto and insert into a new pipeline to return.
     required_transform_ids = (roots + caching_transform_ids +
                               unbounded_source_ids)
-    (t, p) = self._required_components(pipeline_proto, required_transform_ids)
+    (t, p) = self._required_components(pipeline_proto, required_transform_ids,
+                                       set())
 
     def set_proto_map(proto_map, new_value):
       proto_map.clear()
@@ -387,6 +414,9 @@ class PipelineInstrument(object):
     v = InstrumentVisitor(self)
     self._pipeline.visit(v)
 
+    # Add the unbounded source pcollections to the cacheable inputs. This allows
+    # for the caching of unbounded sources without a variable reference.
+    cacheable_inputs.update(unbounded_source_pcolls)
     # Create ReadCache transforms.
     for cacheable_input in cacheable_inputs:
       self._read_cache(self._pipeline, cacheable_input,
@@ -562,43 +592,51 @@ class PipelineInstrument(object):
     """
 
     # Find all cached unbounded PCollections.
-    class CacheableUnboundedPCollectionVisitor(PipelineVisitor):
-      def __init__(self, pin):
-        self._pin = pin
-        self.unbounded_pcolls = set()
 
-      def enter_composite_transform(self, transform_node):
-        self.visit_transform(transform_node)
+    # If the pipeline has unbounded sources, then we want to force all cache
+    # reads to go through the TestStream (even if they are bounded sources).
+    if self.has_unbounded_sources:
+      class CacheableUnboundedPCollectionVisitor(PipelineVisitor):
+        def __init__(self, pin):
+          self._pin = pin
+          self.unbounded_pcolls = set()
 
-      def visit_transform(self, transform_node):
-        if transform_node.inputs:
-          for input_pcoll in transform_node.inputs:
-            key = self._pin.cache_key(input_pcoll)
-            if (key in self._pin._cached_pcoll_read and
-                not input_pcoll.is_bounded):
-              self.unbounded_pcolls.add(key)
+        def enter_composite_transform(self, transform_node):
+          self.visit_transform(transform_node)
 
-    v = CacheableUnboundedPCollectionVisitor(self)
-    pipeline.visit(v)
+        def visit_transform(self, transform_node):
+          if transform_node.outputs:
+            for output_pcoll in transform_node.outputs.values():
+              key = self._pin.cache_key(output_pcoll)
+              if key in self._pin._cached_pcoll_read:
+                self.unbounded_pcolls.add(key)
 
-    # The set of keys from the cached unbounded PCollections will be used as the
-    # output tags for the TestStream. This is to remember what cache-key is
-    # associated with which PCollection.
-    unbounded_cacheables = v.unbounded_pcolls
-    output_tags = unbounded_cacheables
+          if transform_node.inputs:
+            for input_pcoll in transform_node.inputs:
+              key = self._pin.cache_key(input_pcoll)
+              if key in self._pin._cached_pcoll_read:
+                self.unbounded_pcolls.add(key)
 
-    # Take the PCollections that will be read from the TestStream and insert
-    # them back into the dictionary of cached PCollections. The next step will
-    # replace the downstream consumer of the non-cached PCollections with these
-    # PCollections.
-    if output_tags:
-      output_pcolls = pipeline | test_stream.TestStream(
-          output_tags=output_tags, coder=self._cache_manager._default_pcoder)
-      if len(output_tags) == 1:
-        self._cached_pcoll_read[list(output_tags)[0]] = output_pcolls
-      else:
-        for tag, pcoll in output_pcolls.items():
-          self._cached_pcoll_read[tag] = pcoll
+      v = CacheableUnboundedPCollectionVisitor(self)
+      pipeline.visit(v)
+
+      # The set of keys from the cached unbounded PCollections will be used as
+      # the output tags for the TestStream. This is to remember what cache-key
+      # is associated with which PCollection.
+      output_tags = v.unbounded_pcolls
+
+      # Take the PCollections that will be read from the TestStream and insert
+      # them back into the dictionary of cached PCollections. The next step will
+      # replace the downstream consumer of the non-cached PCollections with
+      # these PCollections.
+      if output_tags:
+        output_pcolls = pipeline | test_stream.TestStream(
+            output_tags=output_tags, coder=self._cache_manager._default_pcoder)
+        if len(output_tags) == 1:
+          self._cached_pcoll_read[list(output_tags)[0]] = output_pcolls
+        else:
+          for tag, pcoll in output_pcolls.items():
+            self._cached_pcoll_read[tag] = pcoll
 
     class ReadCacheWireVisitor(PipelineVisitor):
       """Visitor wires cache read as inputs to replace corresponding original
@@ -691,6 +729,21 @@ def build_pipeline_instrument(pipeline, options=None):
   pi.preprocess()
   pi.instrument()  # Instruments the pipeline only once.
   return pi
+
+
+def user_pipeline(pipeline):
+  _, context = pipeline.to_runner_api(return_context=True)
+  pcoll_ids = pcolls_to_pcoll_id(pipeline, context)
+
+  for watching in ie.current_env().watching():
+    for _, v in watching:
+      # TODO(BEAM-8288): cleanup the attribute check when py2 is not supported.
+      if hasattr(v, '__class__') and isinstance(v, beam.pvalue.PCollection):
+        pcoll_id = pcoll_ids.get(str(v), None)
+        if (pcoll_id in context.pcollections and
+            context.pcollections[pcoll_id] != v):
+          return v.pipeline
+  return pipeline
 
 
 def cacheables(pcolls_to_pcoll_id):
@@ -800,3 +853,27 @@ def pcolls_to_pcoll_id(pipeline, original_context):
   v = PCollVisitor()
   pipeline.visit(v)
   return v.pcolls_to_pcoll_id
+
+
+def watch_sources(pipeline):
+  """Watches the unbounded sources in the pipeline.
+
+  Sources can output to a PCollection without a user variable reference. In
+  this case the source is not cached. We still want to cache the data so we
+  synthetically create a variable to the intermediate PCollection.
+  """
+
+  retrieved_user_pipeline = user_pipeline(pipeline)
+  class CacheableUnboundedPCollectionVisitor(PipelineVisitor):
+    def __init__(self):
+      self.unbounded_pcolls = set()
+
+    def enter_composite_transform(self, transform_node):
+      self.visit_transform(transform_node)
+
+    def visit_transform(self, transform_node):
+      if isinstance(transform_node.transform,
+                    REPLACEABLE_UNBOUNDED_SOURCES):
+        for pcoll in transform_node.outputs.values():
+          ie.current_env().watch({'synthetic_var_' + str(id(pcoll)): pcoll})
+  retrieved_user_pipeline.visit(CacheableUnboundedPCollectionVisitor())
