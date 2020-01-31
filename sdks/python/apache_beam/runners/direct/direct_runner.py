@@ -122,7 +122,6 @@ class SwitchingDirectRunner(PipelineRunner):
       outputs[tag] = (mux_output[tag] | label >> _WatermarkController())
 
     return outputs
-  apply_TestStream.__test__ = False
 
   # We must mark this method as not a test or else its name is a matcher for
   # nosetest tests.
