@@ -30,8 +30,8 @@ import logging
 
 import apache_beam as beam
 from apache_beam import runners
-from apache_beam.portability.api.beam_runner_api_pb2 import TestStreamPayload
 from apache_beam.options.pipeline_options import TestOptions
+from apache_beam.portability.api.beam_runner_api_pb2 import TestStreamPayload
 from apache_beam.runners.direct import direct_runner
 from apache_beam.runners.interactive import cache_manager as cache
 from apache_beam.runners.interactive import interactive_environment as ie
@@ -145,6 +145,10 @@ class InteractiveRunner(runners.PipelineRunner):
     if self._force_compute:
       ie.current_env().evict_computed_pcollections()
 
+    # Make sure that sources without a user reference are still cached.
+    inst.watch_sources(pipeline)
+
+    user_pipeline = inst.user_pipeline(pipeline)
     pipeline_instrument = inst.build_pipeline_instrument(pipeline, options)
 
     # The user_pipeline analyzed might be None if the pipeline given has nothing
@@ -152,7 +156,6 @@ class InteractiveRunner(runners.PipelineRunner):
     # When it's None, there is no need to cache including the background
     # caching job and no result to track since no background caching job is
     # started at all.
-    user_pipeline = pipeline_instrument.user_pipeline
     if user_pipeline:
       # Should use the underlying runner and run asynchronously.
       background_caching_job.attempt_to_run_background_caching_job(
@@ -240,14 +243,14 @@ class PipelineResult(beam.runners.runner.PipelineResult):
       results = []
       for e in pcoll_list:
         if isinstance(e, TestStreamPayload.Event):
-            if (e.HasField('watermark_event') or
-                e.HasField('processing_time_event')):
-              continue
-            else:
-              for tv in e.element_event.elements:
-                coder = cache_manager.load_pcoder('full', key)
-                decoded = coder.decode(tv.encoded_element)
-                results.append(decoded)
+          if (e.HasField('watermark_event') or
+              e.HasField('processing_time_event')):
+            continue
+          else:
+            for tv in e.element_event.elements:
+              coder = cache_manager.load_pcoder('full', key)
+              decoded = coder.decode(tv.encoded_element)
+              results.append(decoded)
         else:
           results.append(e)
       return results

@@ -41,6 +41,7 @@ from apache_beam.runners.interactive import background_caching_job as bcj
 from apache_beam.runners.interactive import interactive_environment as ie
 from apache_beam.runners.interactive import interactive_runner as ir
 from apache_beam.runners.interactive import pipeline_fragment as pf
+from apache_beam.runners.interactive import pipeline_instrument as pi
 from apache_beam.runners.interactive.display import pipeline_graph
 from apache_beam.runners.interactive.display.pcoll_visualization import visualize
 
@@ -151,6 +152,9 @@ def show(*pcolls, display_data_exploration=False):
   if isinstance(runner, ir.InteractiveRunner):
     runner = runner._underlying_runner
 
+  # Make sure that sources without a user reference are still cached.
+  pi.watch_sources(user_pipeline)
+
   # Make sure that all PCollections to be shown are watched. If a PCollection
   # has not been watched, make up a variable name for that PCollection and watch
   # it. No validation is needed here because the watch logic can handle
@@ -244,6 +248,9 @@ def head(pcoll, n=5):
   if isinstance(runner, ir.InteractiveRunner):
     runner = runner._underlying_runner
 
+  # Make sure that sources without a user reference are still cached.
+  pi.watch_sources(user_pipeline)
+
   # Make sure that all PCollections to be shown are watched. If a PCollection
   # has not been watched, make up a variable name for that PCollection and watch
   # it. No validation is needed here because the watch logic can handle
@@ -273,7 +280,6 @@ def head(pcoll, n=5):
   # relying on the run to be blocking.
   result.wait_until_finish()
 
-  cache = ie.current_env().cache_manager()
   results = []
   for e in result.get(pcoll):
     results.append(e)
