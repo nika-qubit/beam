@@ -403,8 +403,7 @@ class PCollectionVisualization(object):
     try:
       if ie.current_env().cache_manager().exists('full', self._cache_key):
         pcoll_list, _ = ie.current_env().cache_manager().read('full',
-                                                              self._cache_key,
-                                                              tail=False)
+                                                              self._cache_key)
     # pylint: disable=bare-except
     except:
       _LOGGER.debug(sys.exc_info())
