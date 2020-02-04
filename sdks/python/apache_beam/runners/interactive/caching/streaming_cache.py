@@ -37,6 +37,13 @@ from apache_beam.utils.timestamp import Timestamp
 
 
 class StreamingCacheSink(beam.PTransform):
+  """A PTransform that writes TestStreamFile(Header|Records)s to file.
+
+  Note that this PTransform is assumed to be only run on a single machine where
+  the following assumptions are correct: elements come in ordered, no two
+  transforms are writing to the same file. This PTransform is assumed to only
+  run correctly with the DirectRunner.
+  """
   def __init__(self, cache_dir, filename, sample_resolution_sec,
                coder=SafeFastPrimitivesCoder()):
     self._cache_dir = cache_dir
@@ -45,19 +52,17 @@ class StreamingCacheSink(beam.PTransform):
     self._coder = coder
 
   def expand(self, pcoll):
-    # Note that this assumes that the elements are ordered, so it only works on
-    # the DirectRunner.
-
-    # This is broken in a number of different ways:
-    #  * Assumes elements come in ordered
-    #  * Assumes that there is only one machine doing the writing
-    #
     class StreamingWriteToText(beam.DoFn):
+      """DoFn that performs the writing.
+
+      Note that the other file writing methods cannot be used in streaming
+      contexts.
+      """
       def __init__(self, path, filename, coder=SafeFastPrimitivesCoder()):
         self._path = path
         self._filename = filename
         self._full_path = os.path.join(self._path, self._filename)
-        self.coder = coder
+        self._coder = coder
 
         if not os.path.exists(self._path):
           os.makedirs(self._path)
@@ -69,7 +74,7 @@ class StreamingCacheSink(beam.PTransform):
         self._fh.close()
 
       def process(self, e):
-        self._fh.write(self.coder.encode(e))
+        self._fh.write(self._coder.encode(e))
         self._fh.write(b'\n')
 
     return (pcoll
@@ -85,6 +90,11 @@ class StreamingCacheSink(beam.PTransform):
 
 
 class StreamingCacheSource:
+  """A class that reads and parses TestStreamFile(Header|Reader)s.
+
+  This class is used to read from file and send its to the TestStream via the
+  StreamingCacheManager.Reader.
+  """
   def __init__(self, cache_dir, labels, is_cache_complete=None,
                coder=SafeFastPrimitivesCoder()):
     self._cache_dir = cache_dir
@@ -95,6 +105,8 @@ class StreamingCacheSource:
                                else lambda: True)
 
   def _wait_until_file_exists(self, timeout_secs=30):
+    """Blocks until the file exists for a maximum of timeout_secs.
+    """
     f = None
     now_secs = time.time()
     timeout_timestamp_secs = now_secs + timeout_secs
@@ -119,6 +131,12 @@ class StreamingCacheSource:
     return f
 
   def _emit_from_file(self, fh, tail):
+    """Emits the TestStreamFile(Header|Record)s from file.
+
+    This returns a generator to be able to read all lines from the given file.
+    If `tail` is True, then it will wait until the cache is complete to exit.
+    Otherwise, it will read the file only once.
+    """
     # Always read at least once to read the whole file.
     while True:
       pos = fh.tell()
@@ -149,6 +167,12 @@ class StreamingCacheSource:
           yield record
 
   def read(self, tail):
+    """Reads all TestStreamFile(Header|TestStreamFileRecord)s from file.
+
+    This returns a generator to be able to read all lines from the given file.
+    If `tail` is True, then it will wait until the cache is complete to exit.
+    Otherwise, it will read the file only once.
+    """
     with self._wait_until_file_exists() as f:
       for e in self._emit_from_file(f, tail):
         yield e
@@ -187,6 +211,10 @@ class StreamingCache(CacheManager):
 
   # TODO(srohde): Modify this to return the correct version.
   def read(self, *labels):
+    """Returns a generator to read all records from file.
+
+    Does not tail.
+    """
     if not self.exists(*labels):
       return itertools.chain([]), -1
 
@@ -197,6 +225,12 @@ class StreamingCache(CacheManager):
     return StreamingCache.Reader([header], [reader]).read(), 1
 
   def read_multiple(self, labels):
+    """Returns a generator to read all records from file.
+
+    Does tail until the cache is complete. This is because it is used in the
+    TestStreamServiceController to read from file which is only used during
+    pipeline runtime which needs to block.
+    """
     readers = [
         StreamingCacheSource(self._cache_dir, l,
                              is_cache_complete=self._is_cache_complete)
@@ -205,6 +239,8 @@ class StreamingCache(CacheManager):
     return StreamingCache.Reader(headers, readers).read()
 
   def write(self, values, *labels):
+    """Writes the given values to cache.
+    """
     to_write = [v.SerializeToString() for v in values]
     directory = os.path.join(self._cache_dir, *labels[:-1])
     filepath = os.path.join(directory, labels[-1])
@@ -216,9 +252,20 @@ class StreamingCache(CacheManager):
         f.write(b'\n')
 
   def source(self, *labels):
+    """Returns the StreamingCacheManager source.
+
+    This is beam.Impulse() because unbounded sources will be marked with this
+    and then the PipelineInstrument will replace these with a TestStream.
+    """
     return beam.Impulse()
 
   def sink(self, *labels):
+    """Returns a StreamingCacheSink to write elements to file.
+
+    Note that this is assumed to only work in the DirectRunner as the underlying
+    StreamingCacheSink assumes a single machine to have correct element
+    ordering.
+    """
     filename = labels[-1]
     cache_dir = os.path.join(self._cache_dir, *labels[:-1])
     return StreamingCacheSink(cache_dir, filename, self._sample_resolution_sec)
