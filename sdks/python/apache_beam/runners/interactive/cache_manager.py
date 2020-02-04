@@ -63,12 +63,11 @@ class CacheManager(object):
     """Returns the latest version number of the PCollection cache."""
     raise NotImplementedError
 
-  def read(self, *labels, tail=False):
+  def read(self, *labels):
     """Return the PCollection as a list as well as the version number.
 
     Args:
       *labels: List of labels for PCollection instance.
-      tail: If true, waits indefinitely for new data.
 
     Returns:
       Tuple[Generator[Any], int]: A tuple containing a list of items in the
@@ -177,7 +176,7 @@ class FileBasedCacheManager(CacheManager):
         self._default_pcoder if self._default_pcoder is not None else
         self._saved_pcoders[self._path(*labels)])
 
-  def read(self, *labels, tail=False):
+  def read(self, *labels):
     # Return an iterator to an empty list if it doesn't exist.
     if not self.exists(*labels):
       return itertools.chain([]), -1

@@ -114,7 +114,7 @@ class StreamingCacheSource:
           raise
         time.sleep(1)
     if now_secs >= timeout_timestamp_secs:
-      raise TimeoutError(
+      raise RuntimeError(
           "Timed out waiting for file '{}' to be available".format(path))
     return f
 
@@ -186,20 +186,21 @@ class StreamingCache(CacheManager):
     return os.path.exists(path)
 
   # TODO(srohde): Modify this to return the correct version.
-  def read(self, *labels, tail=True):
+  def read(self, *labels):
     if not self.exists(*labels):
       return itertools.chain([]), -1
 
     reader = StreamingCacheSource(
         self._cache_dir, labels,
-        is_cache_complete=self._is_cache_complete).read(tail)
+        is_cache_complete=self._is_cache_complete).read(tail=False)
     header = next(reader)
     return StreamingCache.Reader([header], [reader]).read(), 1
 
-  def read_multiple(self, labels, tail=True):
-    readers = [StreamingCacheSource(
-        self._cache_dir, l,
-        is_cache_complete=self._is_cache_complete).read(tail) for l in labels]
+  def read_multiple(self, labels):
+    readers = [
+        StreamingCacheSource(self._cache_dir, l,
+                             is_cache_complete=self._is_cache_complete)
+        .read(tail=True) for l in labels]
     headers = [next(r) for r in readers]
     return StreamingCache.Reader(headers, readers).read()
 
