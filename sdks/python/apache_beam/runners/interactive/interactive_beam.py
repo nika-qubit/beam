@@ -44,6 +44,7 @@ from apache_beam.runners.interactive import pipeline_fragment as pf
 from apache_beam.runners.interactive import pipeline_instrument as pi
 from apache_beam.runners.interactive.display import pipeline_graph
 from apache_beam.runners.interactive.display.pcoll_visualization import visualize
+from apache_beam.runners.interactive.display.pcoll_visualization import to_dataframe
 
 
 def watch(watchable):
@@ -206,8 +207,8 @@ def show(*pcolls, visualize_data=False):
     ie.current_env().mark_pcollection_computed(pcolls)
 
 
-def collect(pcoll):
-  """Materializes all of the elements from a PCollection.
+def collect(pcoll, reify=True):
+  """Materializes all of the elements from a PCollection into a Dataframe.
 
   For example::
 
@@ -215,30 +216,26 @@ def collect(pcoll):
     init = p | 'Init' >> beam.Create(range(10))
     square = init | 'Square' >> beam.Map(lambda x: x * x)
 
-    # Run the pipeline and bring the PCollection into memory.
+    # Run the pipeline and bring the PCollection into memory as a Dataframe.
     in_memory_square = collect(square)
-
-    # The following prints out: [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]
-    print(in_memory_square)
   """
   max_size = sys.maxsize if hasattr(sys, 'maxsize') else sys.maxint
-  return head(pcoll, n=max_size)
+  return head(pcoll, n=max_size, reify=reify)
 
 
-def head(pcoll, n=5):
-  """Materializes the first n elements from a PCollection.
+def head(pcoll, n=5, reify=True):
+  """Materializes the first n elements from a PCollection into a Dataframe.
 
+  This reads each element from file and reads only the amount that it needs
+  into memory.
   For example::
 
     p = beam.Pipeline(InteractiveRunner())
     init = p | 'Init' >> beam.Create(range(10))
     square = init | 'Square' >> beam.Map(lambda x: x * x)
 
-    # Run the pipeline and bring the PCollection into memory.
+    # Run the pipeline and bring the PCollection into memory as a Dataframe.
     in_memory_square = head(square, n=5)
-
-    # The following prints out: [0, 1, 4, 9, 16]
-    print(in_memory_square)
   """
   assert isinstance(pcoll, beam.pvalue.PCollection), (
       '{} is not an apache_beam.pvalue.PCollection.'.format(pcoll))
@@ -281,7 +278,7 @@ def head(pcoll, n=5):
   result.wait_until_finish()
 
   results = []
-  for e in result.get(pcoll):
+  for e in result.get(pcoll, reify=True):
     results.append(e)
     if len(results) >= n:
       break
@@ -292,7 +289,7 @@ def head(pcoll, n=5):
   if result.state is beam.runners.runner.PipelineState.DONE:
     ie.current_env().mark_pcollection_computed([pcoll])
 
-  return results
+  return to_dataframe(pcoll, results, reify=reify)
 
 
 def show_graph(pipeline):

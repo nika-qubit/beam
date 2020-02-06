@@ -229,11 +229,15 @@ class PipelineInstrumentTest(unittest.TestCase):
     p = beam.Pipeline(interactive_runner.InteractiveRunner())
     a = p | 'ReadUnboundedSourceA' >> beam.io.ReadFromPubSub(
         subscription='projects/fake-project/subscriptions/fake_sub')
-    _ = a | 'a' >> cache.WriteCache(ie.current_env().cache_manager(), '')
+    _ = (a
+         | 'reify a' >> beam.Map(lambda _: _)
+         | 'a' >> cache.WriteCache(ie.current_env().cache_manager(), ''))
 
     b = p | 'ReadUnboundedSourceB' >> beam.io.ReadFromPubSub(
         subscription='projects/fake-project/subscriptions/fake_sub')
-    _ = b | 'b' >> cache.WriteCache(ie.current_env().cache_manager(), '')
+    _ = (b
+         | 'reify b' >> beam.Map(lambda _: _)
+         | 'b' >> cache.WriteCache(ie.current_env().cache_manager(), ''))
 
     expected_pipeline = p.to_runner_api(
         return_context=False, use_fake_coders=True)
@@ -271,13 +275,15 @@ class PipelineInstrumentTest(unittest.TestCase):
     pipeline_instrument = instr.build_pipeline_instrument(p_copy)
     # Manually instrument original pipeline with expected pipeline transforms.
     init_pcoll_cache_key = pipeline_instrument.cache_key(init_pcoll)
-    _ = init_pcoll | (
-        ('_WriteCache_' + init_pcoll_cache_key) >> cache.WriteCache(
-            ie.current_env().cache_manager(), init_pcoll_cache_key))
+    _ = (init_pcoll
+         | 'reify init' >> beam.Map(lambda _: _)
+         | '_WriteCache_' + init_pcoll_cache_key >> cache.WriteCache(
+             ie.current_env().cache_manager(), init_pcoll_cache_key))
     second_pcoll_cache_key = pipeline_instrument.cache_key(second_pcoll)
-    _ = second_pcoll | (
-        ('_WriteCache_' + second_pcoll_cache_key) >> cache.WriteCache(
-            ie.current_env().cache_manager(), second_pcoll_cache_key))
+    _ = (second_pcoll
+         | 'reify second' >> beam.Map(lambda _: _)
+         | '_WriteCache_' + second_pcoll_cache_key >> cache.WriteCache(
+             ie.current_env().cache_manager(), second_pcoll_cache_key))
     # The 2 pipelines should be the same now.
     assert_pipeline_equal(self, p_copy, p_origin)
 
@@ -297,9 +303,11 @@ class PipelineInstrumentTest(unittest.TestCase):
         (p_origin, init_pcoll, second_pcoll))
     instr.build_pipeline_instrument(p_copy)
 
-    cached_init_pcoll = p_origin | (
-        '_ReadCache_' + init_pcoll_cache_key) >> cache.ReadCache(
-            ie.current_env().cache_manager(), init_pcoll_cache_key)
+    cached_init_pcoll = (p_origin
+                         | '_ReadCache_' + init_pcoll_cache_key >>
+                         cache.ReadCache(ie.current_env().cache_manager(),
+                                         init_pcoll_cache_key)
+                         | 'unreify' >> beam.Map(lambda _: _))
 
     # second_pcoll is never used as input and there is no need to read cache.
 
@@ -463,6 +471,7 @@ class PipelineInstrumentTest(unittest.TestCase):
     # pylint: disable=expression-not-assigned
     (test_stream
      | 'square1' >> beam.Map(lambda e: e)
+     | 'reify' >> beam.Map(lambda _: _)
      | cache.WriteCache(ie.current_env().cache_manager(), 'unused')
      )
 
@@ -547,6 +556,7 @@ class PipelineInstrumentTest(unittest.TestCase):
       test_stream[cache_key_of('source_2', source_2)])
      | beam.Flatten()
      | 'square1' >> beam.Map(lambda x: x * x)
+     | 'reify' >> beam.Map(lambda _: _)
      | cache.WriteCache(ie.current_env().cache_manager(), 'unused')
      )
 
@@ -679,6 +689,7 @@ class PipelineInstrumentTest(unittest.TestCase):
     # pylint: disable=expression-not-assigned
     (test_stream
      | 'square1' >> beam.Map(lambda x: x * x)
+     | 'reify' >> beam.Map(lambda _: _)
      | cache.WriteCache(ie.current_env().cache_manager(), 'unused')
      )
 
@@ -801,14 +812,14 @@ class PipelineInstrumentTest(unittest.TestCase):
         use_fake_coders=True)
     self.assertEqual(
         len(pruned_proto.components.transforms[
-            'ref_AppliedPTransform_AppliedPTransform_1'].subtransforms), 3)
+            'ref_AppliedPTransform_AppliedPTransform_1'].subtransforms), 5)
     assert_pipeline_proto_not_contain_top_level_transform(
         self,
         pruned_proto,
         'Init Source')
     self.assertEqual(
         len(full_proto.components.transforms[
-            'ref_AppliedPTransform_AppliedPTransform_1'].subtransforms), 4)
+            'ref_AppliedPTransform_AppliedPTransform_1'].subtransforms), 6)
     assert_pipeline_proto_contain_top_level_transform(
         self,
         full_proto,

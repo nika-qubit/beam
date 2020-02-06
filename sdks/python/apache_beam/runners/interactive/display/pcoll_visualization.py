@@ -27,6 +27,7 @@ from __future__ import absolute_import
 import base64
 import logging
 import sys
+from collections import OrderedDict
 from datetime import timedelta
 
 from pandas.io.json import json_normalize
@@ -35,6 +36,7 @@ from apache_beam import pvalue
 from apache_beam.portability.api.beam_runner_api_pb2 import TestStreamPayload
 from apache_beam.runners.interactive import interactive_environment as ie
 from apache_beam.runners.interactive import pipeline_instrument as instr
+from apache_beam.utils.windowed_value import WindowedValue
 
 try:
   import jsons  # pylint: disable=import-error
@@ -94,8 +96,8 @@ _DATAFRAME_PAGINATION_TEMPLATE = """
                       }},
                       {{
                         "targets": 0,
-                        "width": "5%",
-                        "title": "index"
+                        "width": "10px",
+                        "title": ""
                       }}
                     ]
                   }});
@@ -223,7 +225,8 @@ class PCollectionVisualization(object):
     # Double check if the dependency is ready in case someone mistakenly uses
     # the function.
     if _pcoll_visualization_ready:
-      data = self._to_dataframe()
+      elements = _to_element_list(self._cache_key)
+      data = to_dataframe(self._pcoll, elements)
       # Displays a data-table with at most 25 entries from the head.
       data_sample = data.head(25)
       display(data_sample)
@@ -243,7 +246,8 @@ class PCollectionVisualization(object):
     (the uniqueness is guaranteed throughout the lifespan of the PCollection
     variable).
     """
-    data = self._to_dataframe()
+    elements = _to_element_list(self._cache_key)
+    data = to_dataframe(self._pcoll, elements)
     if updating_pv:
       # Only updates when data is not empty. Otherwise, consider it a bad
       # iteration and noop since there is nothing to be updated.
@@ -300,62 +304,82 @@ class PCollectionVisualization(object):
           table_id=table_id)
       display(HTML(html), display_id=self._df_display_id)
 
-  def _to_element_list(self):
+def _to_element_list(cache_key):
+  pcoll_list = iter([])
+  try:
+    if ie.current_env().cache_manager().exists('full', cache_key):
+      pcoll_list, _ = ie.current_env().cache_manager().read('full', cache_key)
+  # pylint: disable=bare-except
+  except:
+    _LOGGER.debug(sys.exc_info())
+    # If the read errors out for some reason, be resilient to it and return
+    # empty data.
     pcoll_list = iter([])
-    try:
-      if ie.current_env().cache_manager().exists('full', self._cache_key):
-        pcoll_list, _ = ie.current_env().cache_manager().read('full',
-                                                              self._cache_key)
+
+  output = []
+  while True:
     # pylint: disable=bare-except
+    try:
+      el = next(pcoll_list)
+      if isinstance(el, TestStreamPayload.Event):
+        if (el.HasField('watermark_event') or
+            el.HasField('processing_time_event')):
+          continue
+
+        cache = ie.current_env().cache_manager()
+        for tv in el.element_event.elements:
+          coder = cache.load_pcoder('full', cache_key)
+          val = coder.decode(tv.encoded_element)
+          output.append(val)
+      else:
+        output.append(el)
+
+    except StopIteration:
+      break
+
     except:
       _LOGGER.debug(sys.exc_info())
-      # If the read errors out for some reason, be resilient to it and return
-      # empty data.
-      pcoll_list = iter([])
-    return pcoll_list
 
-  def _to_dataframe(self):
-    jsons.suppress_warnings()
-    normalized_list = []
-    # Column name for _one_dimension_types if presents.
-    normalized_column = str(self._pcoll)
-    element_list = self._to_element_list()
-    # Normalization needs to be done for each element because they might be of
-    # different types. The check is only done on the root level, pandas json
-    # normalization I/O would take care of the nested levels.
-    while True:
-      # pylint: disable=bare-except
-      try:
-        el = next(element_list)
-        parsed = []
-        if isinstance(el, TestStreamPayload.Event):
-          if (el.HasField('watermark_event') or
-              el.HasField('processing_time_event')):
-            continue
-          else:
-            cache = ie.current_env().cache_manager()
-            for tv in el.element_event.elements:
-              coder = cache.load_pcoder('full', self._cache_key)
-              parsed.append(coder.decode(tv.encoded_element))
-        else:
-          parsed.append(el)
+  return output
 
-        for e in parsed:
-          if self._is_one_dimension_type(e):
-            # Makes such data structured.
-            normalized_list.append({normalized_column: e})
-          else:
-            normalized_list.append(jsons.load(jsons.dump(e)))
-      except StopIteration:
-        break
+def to_dataframe(pcoll, elements, reify=True):
+  jsons.suppress_warnings()
+  normalized_list = []
+  # Normalization needs to be done for each element because they might be of
+  # different types. The check is only done on the root level, pandas json
+  # normalization I/O would take care of the nested levels.
 
-      except:
-        _LOGGER.debug(sys.exc_info())
-        continue
-    # Creates a dataframe that str() 1-d iterable elements after
-    # normalization so that facets_overview can treat such data as categorical.
-    return json_normalize(normalized_list).applymap(
-        lambda x: str(x) if type(x) in (list, tuple) else x)
+  columns = ['element']
+  if reify:
+    columns = ['element', 'event_time', 'window']
 
-  def _is_one_dimension_type(self, val):
-    return type(val) in _one_dimension_types
+  normalized_list = []
+  for el in elements:
+    if not isinstance(el, WindowedValue):
+      el = WindowedValue(**el)
+
+    # Use an OrderedDict to keep the column order.
+    value = str(el.value)
+    event_time = str(el.timestamp.micros)
+    win = str(el.windows)
+
+    el = OrderedDict([
+        ('element', value),
+        ('event_time', event_time),
+        ('window', win)])
+
+    normalized_list.append(jsons.loads(jsons.dumps(el),
+                                       object_pairs_hook=OrderedDict))
+
+  # Creates a dataframe that str() 1-d iterable elements after
+  # normalization so that facets_overview can treat such data as categorical.
+  df = json_normalize(normalized_list).applymap(
+      lambda x: str(x) if type(x) in (list, tuple) else x)
+
+  # Reindex to show the dataframe with the correct column order.
+  if columns:
+    return df.reindex(columns=columns)
+  return df
+
+def _is_one_dimension_type(val):
+  return type(val) in _one_dimension_types

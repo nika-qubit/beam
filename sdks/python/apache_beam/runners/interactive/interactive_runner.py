@@ -39,6 +39,7 @@ from apache_beam.runners.interactive import pipeline_instrument as inst
 from apache_beam.runners.interactive import background_caching_job
 from apache_beam.runners.interactive.display import pipeline_graph
 from apache_beam.testing.test_stream_service import TestStreamServiceController
+from apache_beam.transforms.window import WindowedValue
 
 # size of PCollection samples cached.
 SAMPLE_SIZE = 8
@@ -226,7 +227,12 @@ class PipelineResult(beam.runners.runner.PipelineResult):
   def wait_until_finish(self):
     self._underlying_result.wait_until_finish()
 
-  def get(self, pcoll):
+  def get(self, pcoll, reify=False):
+    """Materializes the PCollection into a list.
+
+    If reify is True, then returns the elements as WindowedValues. Otherwise,
+    return the element as itself.
+    """
     key = self._pipeline_instrument.cache_key(pcoll)
     cache_manager = ie.current_env().cache_manager()
     if cache_manager.exists('full', key):
@@ -241,9 +247,10 @@ class PipelineResult(beam.runners.runner.PipelineResult):
             for tv in e.element_event.elements:
               coder = cache_manager.load_pcoder('full', key)
               decoded = coder.decode(tv.encoded_element)
-              results.append(decoded)
+              results.append(
+                  WindowedValue(**decoded) if reify else decoded['value'])
         else:
-          results.append(e)
+          results.append(WindowedValue(**e) if reify else e['value'])
       return results
     else:
       raise ValueError('PCollection not available, please run the pipeline.')
