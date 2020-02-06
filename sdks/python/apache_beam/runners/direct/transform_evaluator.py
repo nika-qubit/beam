@@ -421,8 +421,12 @@ class _WatermarkControllerEvaluator(_TransformEvaluator):
       main_output = list(self._outputs)[0]
       bundle = self._evaluation_context.create_bundle(main_output)
       for tv in event.timestamped_values:
-        bundle.output(
-            GlobalWindows.windowed_value(tv.value, timestamp=tv.timestamp))
+        # Unreify the value into the correct window.
+        try:
+          bundle.output(WindowedValue(**tv.value))
+        except TypeError:
+          bundle.output(GlobalWindows.windowed_value(tv.value,
+                                                     timestamp=tv.timestamp))
       self.bundles.append(bundle)
 
   def finish_bundle(self):

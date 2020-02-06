@@ -547,8 +547,20 @@ class PipelineInstrument(object):
     # Only need to write when the cache with expected key doesn't exist.
     if not self._cache_manager.exists('full', key):
       label = '{}{}'.format(WRITE_CACHE, key)
-      extended_target = pcoll | label >> cache.WriteCache(
-          self._cache_manager, key)
+
+      # Read the windowing information and cache it along with the element. This
+      # caches the arguments to a WindowedValue object because Python has logic
+      # that detects if a DoFn returns a WindowedValue. When it detecs one, it
+      # puts the element into the correct window then emits the value to
+      # downstream transforms.
+      class Reify(beam.DoFn):
+        def process(self, e, w=beam.DoFn.WindowParam, p=beam.DoFn.PaneInfoParam,
+                    t=beam.DoFn.TimestampParam):
+          yield {'value': e, 'timestamp': t, 'windows': [w], 'pane_info': p}
+
+      extended_target = (pcoll
+                         | label + 'reify' >> beam.ParDo(Reify())
+                         | label >> cache.WriteCache(self._cache_manager, key))
       if output_as_extended_target:
         self._extended_targets.add(extended_target)
 
@@ -576,10 +588,17 @@ class PipelineInstrument(object):
       if key not in self._cached_pcoll_read:
         # Mutates the pipeline with cache read transform attached
         # to root of the pipeline.
+
+        # To put the cached value into the correct window, simply return a
+        # WindowedValue constructed from the element.
+        class Unreify(beam.DoFn):
+          def process(self, e):
+            yield beam.window.WindowedValue(**e)
         pcoll_from_cache = (
             pipeline
             | '{}{}'.format(READ_CACHE, key) >> cache.ReadCache(
-                self._cache_manager, key))
+                self._cache_manager, key)
+            | '{}{}unreify'.format(READ_CACHE, key) >> beam.ParDo(Unreify()))
         self._cached_pcoll_read[key] = pcoll_from_cache
     # else: NOOP when cache doesn't exist, just compute the original graph.
 
