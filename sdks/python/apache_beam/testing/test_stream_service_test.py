@@ -44,8 +44,9 @@ class EventsReader:
 
   def read_multiple(self, keys):
     if keys != self._expected_key:
-      raise ValueError('Expected key ({}) is not argument({})'.format(
-          self._expected_key, keys))
+      raise ValueError(
+          'Expected key ({}) is not argument({})'.format(
+              self._expected_key, keys))
 
     for i in range(10):
       e = TestStreamPayload.Event()
@@ -73,16 +74,18 @@ class TestStreamServiceTest(unittest.TestCase):
   def test_normal_run(self):
     r = self.stub.Events(beam_runner_api_pb2.EventsRequest(keys=EXPECTED_KEYS))
     events = [e for e in r]
-    expected_events = [e for e in EventsReader(
-        expected_key=[EXPECTED_KEYS]).read_multiple([EXPECTED_KEYS])]
+    expected_events = [
+        e for e in EventsReader(
+            expected_key=[EXPECTED_KEYS]).read_multiple([EXPECTED_KEYS])
+    ]
 
     self.assertEqual(events, expected_events)
 
   def test_multiple_sessions(self):
-    resp_a = self.stub.Events(beam_runner_api_pb2.EventsRequest(
-        keys=EXPECTED_KEYS))
-    resp_b = self.stub.Events(beam_runner_api_pb2.EventsRequest(
-        keys=EXPECTED_KEYS))
+    resp_a = self.stub.Events(
+        beam_runner_api_pb2.EventsRequest(keys=EXPECTED_KEYS))
+    resp_b = self.stub.Events(
+        beam_runner_api_pb2.EventsRequest(keys=EXPECTED_KEYS))
 
     events_a = []
     events_b = []
@@ -103,8 +106,10 @@ class TestStreamServiceTest(unittest.TestCase):
 
       done = a_is_done and b_is_done
 
-    expected_events = [e for e in EventsReader(
-        expected_key=[EXPECTED_KEYS]).read_multiple([EXPECTED_KEYS])]
+    expected_events = [
+        e for e in EventsReader(
+            expected_key=[EXPECTED_KEYS]).read_multiple([EXPECTED_KEYS])
+    ]
 
     self.assertEqual(events_a, expected_events)
     self.assertEqual(events_b, expected_events)

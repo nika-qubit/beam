@@ -173,21 +173,18 @@ def show(*pcolls, visualize_data=False):
   warnings.filterwarnings('ignore', category=DeprecationWarning)
   # Attempt to run background caching job since we have the reference to the
   # user-defined pipeline.
-  bcj.attempt_to_run_background_caching_job(runner, user_pipeline,
-                                            user_pipeline.options)
+  bcj.attempt_to_run_background_caching_job(
+      runner, user_pipeline, user_pipeline.options)
 
   # Build a pipeline fragment for the PCollections and run it.
   result = pf.PipelineFragment(list(pcolls), user_pipeline.options).run()
-  ie.current_env().set_pipeline_result(
-      user_pipeline,
-      result)
+  ie.current_env().set_pipeline_result(user_pipeline, result)
 
   # If in notebook, dynamic plotting as computation goes.
   if ie.current_env().is_in_notebook:
     for pcoll in pcolls:
-      visualize(pcoll,
-                dynamic_plotting_interval=1,
-                display_facets=visualize_data)
+      visualize(
+          pcoll, dynamic_plotting_interval=1, display_facets=visualize_data)
 
   # Invoke wait_until_finish to ensure the blocking nature of this API without
   # relying on the run to be blocking.
@@ -264,14 +261,12 @@ def head(pcoll, n=5, reify=True):
   warnings.filterwarnings('ignore', category=DeprecationWarning)
   # Attempt to run background caching job since we have the reference to the
   # user-defined pipeline.
-  bcj.attempt_to_run_background_caching_job(runner, user_pipeline,
-                                            user_pipeline.options)
+  bcj.attempt_to_run_background_caching_job(
+      runner, user_pipeline, user_pipeline.options)
 
   # Build a pipeline fragment for the PCollections and run it.
   result = pf.PipelineFragment([pcoll], user_pipeline.options).run()
-  ie.current_env().set_pipeline_result(
-      user_pipeline,
-      result)
+  ie.current_env().set_pipeline_result(user_pipeline, result)
 
   # Invoke wait_until_finish to ensure the blocking nature of this API without
   # relying on the run to be blocking.

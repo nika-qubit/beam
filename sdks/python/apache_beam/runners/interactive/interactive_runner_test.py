@@ -58,7 +58,6 @@ def print_with_message(msg):
 
 
 class InteractiveRunnerTest(unittest.TestCase):
-
   def setUp(self):
     ie.new_env()
 
@@ -81,7 +80,6 @@ class InteractiveRunnerTest(unittest.TestCase):
 
   def test_wordcount(self):
     class WordExtractingDoFn(beam.DoFn):
-
       def process(self, element):
         text_line = element.strip()
         words = text_line.split()
@@ -108,7 +106,8 @@ class InteractiveRunnerTest(unittest.TestCase):
 
     actual = dict(result.get(counts))
     self.assertDictEqual(
-        actual, {
+        actual,
+        {
             'to': 2,
             'be': 2,
             'or': 1,
@@ -123,18 +122,22 @@ class InteractiveRunnerTest(unittest.TestCase):
     # as units then gets upcast to micros.
     end_of_window = (GlobalWindow().max_timestamp().micros // 1000) * 1000
     df_counts = ib.collect(counts, reify=True)
-    df_expected = pd.DataFrame(
-        {'element': [str(e) for e in actual.items()],
-         'event_time': [str(end_of_window) for _ in actual],
-         'window': [str([GlobalWindow()]) for _ in actual]})
+    df_expected = pd.DataFrame({
+        'element': [str(e) for e in actual.items()],
+        'event_time': [str(end_of_window) for _ in actual],
+        'window': [str([GlobalWindow()]) for _ in actual]
+    })
 
     pd.testing.assert_frame_equal(df_expected, df_counts)
 
     actual_reified = result.get(counts, reify=True)
     expected_reified = [
-        WindowedValue(e, Timestamp(micros=end_of_window), [GlobalWindow()],
-                      PaneInfo(True, True, PaneInfoTiming.ON_TIME, 0, 0))
-        for e in actual.items()]
+        WindowedValue(
+            e,
+            Timestamp(micros=end_of_window), [GlobalWindow()],
+            PaneInfo(True, True, PaneInfoTiming.ON_TIME, 0, 0))
+        for e in actual.items()
+    ]
     self.assertEqual(actual_reified, expected_reified)
 
   def test_session(self):
@@ -155,8 +158,9 @@ class InteractiveRunnerTest(unittest.TestCase):
     runner.end_session()
     self.assertFalse(underlying_runner._in_session)
 
-  @unittest.skipIf(not ie.current_env().is_interactive_ready,
-                   '[interactive] dependency is not installed.')
+  @unittest.skipIf(
+      not ie.current_env().is_interactive_ready,
+      '[interactive] dependency is not installed.')
   @patch('IPython.get_ipython', new_callable=mock_get_ipython)
   def test_mark_pcollection_completed_after_successful_run(self, cell):
     with cell:  # Cell 1
@@ -169,7 +173,7 @@ class InteractiveRunnerTest(unittest.TestCase):
 
     with cell:  # Cell 3
       square = init | 'Square' >> beam.Map(lambda x: x * x)
-      cube = init | 'Cube' >> beam.Map(lambda x: x ** 3)
+      cube = init | 'Cube' >> beam.Map(lambda x: x**3)
 
     ib.watch(locals())
     result = p.run()

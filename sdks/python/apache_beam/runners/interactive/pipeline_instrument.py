@@ -41,9 +41,7 @@ WRITE_CACHE = "_WriteCache_"
 # Use a tuple to define the list of unbounded sources. It is not always feasible
 # to correctly find all the unbounded sources in the SDF world. This is
 # because SDF allows the source to dynamically create sources at runtime.
-REPLACEABLE_UNBOUNDED_SOURCES = (
-    ReadFromPubSub,
-)
+REPLACEABLE_UNBOUNDED_SOURCES = (ReadFromPubSub, )
 
 
 class PipelineInstrument(object):
@@ -56,7 +54,6 @@ class PipelineInstrument(object):
   runner's responsibility to coordinate supported underlying runners to run
   the pipeline instrumented and recover the original pipeline states if needed.
   """
-
   def __init__(self, pipeline, options=None):
     self._pipeline = pipeline
     # The global cache manager is lazily initiated outside of this module by any
@@ -69,14 +66,10 @@ class PipelineInstrument(object):
     # proto is stable. The snapshot of pipeline will not be mutated within this
     # module and can be used to recover original pipeline if needed.
     self._pipeline_snap = beam.pipeline.Pipeline.from_runner_api(
-        pipeline.to_runner_api(use_fake_coders=True),
-        pipeline.runner,
-        options)
+        pipeline.to_runner_api(use_fake_coders=True), pipeline.runner, options)
 
     self._background_caching_pipeline = beam.pipeline.Pipeline.from_runner_api(
-        pipeline.to_runner_api(use_fake_coders=True),
-        pipeline.runner,
-        options)
+        pipeline.to_runner_api(use_fake_coders=True), pipeline.runner, options)
 
     # Snapshot of original pipeline information.
     (self._original_pipeline_proto,
@@ -88,16 +81,17 @@ class PipelineInstrument(object):
         self._background_caching_pipeline)
     # TODO(BEAM-7760): once cache scope changed, this is not needed to manage
     # relationships across pipelines, runners, and jobs.
-    self._pcolls_to_pcoll_id = pcolls_to_pcoll_id(self._pipeline_snap,
-                                                  self._original_context)
+    self._pcolls_to_pcoll_id = pcolls_to_pcoll_id(
+        self._pipeline_snap, self._original_context)
 
     # A mapping from PCollection id to python id() value in user defined
     # pipeline instance.
-    (self._pcoll_version_map,
-     self._cacheables,
-     # A dict from pcoll_id to variable name of the referenced PCollection.
-     # (Dict[str, str])
-     self._cacheable_var_by_pcoll_id) = cacheables(self.pcolls_to_pcoll_id)
+    (
+        self._pcoll_version_map,
+        self._cacheables,
+        # A dict from pcoll_id to variable name of the referenced PCollection.
+        # (Dict[str, str])
+        self._cacheable_var_by_pcoll_id) = cacheables(self.pcolls_to_pcoll_id)
 
     # A dict from cache key to PCollection that is read from cache.
     # If exists, caller should reuse the PCollection read. If not, caller
@@ -134,14 +128,17 @@ class PipelineInstrument(object):
     if len(targets) > 0:
       # Prunes upstream transforms that don't contribute to the targets the
       # instrumented pipeline run cares.
-      return pf.PipelineFragment(list(targets)).deduce_fragment().to_runner_api(
-          use_fake_coders=True)
+      return pf.PipelineFragment(
+          list(targets)).deduce_fragment().to_runner_api(use_fake_coders=True)
     return self._pipeline.to_runner_api(use_fake_coders=True)
 
-  def _required_components(self, pipeline_proto, required_transforms_ids,
-                           visited,
-                           follow_outputs=False,
-                           follow_inputs=False):
+  def _required_components(
+      self,
+      pipeline_proto,
+      required_transforms_ids,
+      visited,
+      follow_outputs=False,
+      follow_inputs=False):
     """Returns the components and subcomponents of the given transforms.
 
     This method returns all the components (transforms, PCollections, coders,
@@ -158,10 +155,13 @@ class PipelineInstrument(object):
     required_transforms = {k: transforms[k] for k in required_transforms_ids}
 
     # Cache all the output PCollections of the transforms.
-    pcollection_ids = [pc for t in required_transforms.values()
-                       for pc in t.outputs.values()]
-    required_pcollections = {pc_id: pcollections[pc_id]
-                             for pc_id in pcollection_ids}
+    pcollection_ids = [
+        pc for t in required_transforms.values() for pc in t.outputs.values()
+    ]
+    required_pcollections = {
+        pc_id: pcollections[pc_id]
+        for pc_id in pcollection_ids
+    }
 
     subtransforms = {}
     subpcollections = {}
@@ -170,46 +170,58 @@ class PipelineInstrument(object):
     for transform_id, transform in required_transforms.items():
       if transform_id in pipeline_proto.root_transform_ids:
         continue
-      (t, pc) = self._required_components(pipeline_proto,
-                                          transform.subtransforms,
-                                          visited,
-                                          follow_outputs=False,
-                                          follow_inputs=False)
+      (t, pc) = self._required_components(
+          pipeline_proto,
+          transform.subtransforms,
+          visited,
+          follow_outputs=False,
+          follow_inputs=False)
       subtransforms.update(t)
       subpcollections.update(pc)
 
     if follow_outputs:
-      outputs = [pc_id for t in required_transforms.values()
-                 for pc_id in t.outputs.values()]
+      outputs = [
+          pc_id for t in required_transforms.values()
+          for pc_id in t.outputs.values()
+      ]
       visited_copy = visited.copy()
-      consuming_transforms = {t_id: t for t_id, t in transforms.items()
-                              if set(outputs).intersection(
-                                  set(t.inputs.values()))}
+      consuming_transforms = {
+          t_id: t
+          for t_id,
+          t in transforms.items()
+          if set(outputs).intersection(set(t.inputs.values()))
+      }
       consuming_transforms = set(consuming_transforms.keys())
       visited.update(consuming_transforms)
       consuming_transforms = consuming_transforms - visited_copy
-      (t, pc) = self._required_components(pipeline_proto,
-                                          list(consuming_transforms),
-                                          visited,
-                                          follow_outputs,
-                                          follow_inputs)
+      (t, pc) = self._required_components(
+          pipeline_proto,
+          list(consuming_transforms),
+          visited,
+          follow_outputs,
+          follow_inputs)
       subtransforms.update(t)
       subpcollections.update(pc)
 
     if follow_inputs:
-      inputs = [pc_id for t in required_transforms.values()
-                for pc_id in t.inputs.values()]
-      producing_transforms = {t_id: t for t_id, t in transforms.items()
-                              if set(inputs).intersection(
-                                  set(t.outputs.values()))}
-      (t, pc) = self._required_components(pipeline_proto,
-                                          list(producing_transforms.keys()),
-                                          visited,
-                                          follow_outputs,
-                                          follow_inputs)
+      inputs = [
+          pc_id for t in required_transforms.values()
+          for pc_id in t.inputs.values()
+      ]
+      producing_transforms = {
+          t_id: t
+          for t_id,
+          t in transforms.items()
+          if set(inputs).intersection(set(t.outputs.values()))
+      }
+      (t, pc) = self._required_components(
+          pipeline_proto,
+          list(producing_transforms.keys()),
+          visited,
+          follow_outputs,
+          follow_inputs)
       subtransforms.update(t)
       subpcollections.update(pc)
-
 
     # Now we got all the components and their subcomponents, so return the
     # complete collection.
@@ -228,11 +240,12 @@ class PipelineInstrument(object):
     # of one of these roots.
     roots = [root for root in pipeline_proto.root_transform_ids]
 
-    (t, p) = self._required_components(pipeline_proto,
-                                       roots + required_transform_ids,
-                                       set(),
-                                       follow_outputs=True,
-                                       follow_inputs=True)
+    (t, p) = self._required_components(
+        pipeline_proto,
+        roots + required_transform_ids,
+        set(),
+        follow_outputs=True,
+        follow_inputs=True)
 
     def set_proto_map(proto_map, new_value):
       proto_map.clear()
@@ -244,17 +257,19 @@ class PipelineInstrument(object):
     pipeline_to_execute.root_transform_ids[:] = roots
     set_proto_map(pipeline_to_execute.components.transforms, t)
     set_proto_map(pipeline_to_execute.components.pcollections, p)
-    set_proto_map(pipeline_to_execute.components.coders,
-                  context.to_runner_api().coders)
-    set_proto_map(pipeline_to_execute.components.windowing_strategies,
-                  context.to_runner_api().windowing_strategies)
+    set_proto_map(
+        pipeline_to_execute.components.coders, context.to_runner_api().coders)
+    set_proto_map(
+        pipeline_to_execute.components.windowing_strategies,
+        context.to_runner_api().windowing_strategies)
 
     # Cut out all subtransforms in the root that aren't the required transforms.
     for root_id in roots:
       root = pipeline_to_execute.components.transforms[root_id]
       root.subtransforms[:] = [
           transform_id for transform_id in root.subtransforms
-          if transform_id in pipeline_to_execute.components.transforms]
+          if transform_id in pipeline_to_execute.components.transforms
+      ]
 
     return pipeline_to_execute
 
@@ -283,21 +298,24 @@ class PipelineInstrument(object):
     # It's added there so that multiple calls to this method won't add multiple
     # caching operations (idempotent).
     transforms = pipeline_proto.components.transforms
-    caching_transform_ids = [t_id for root in roots
-                             for t_id in transforms[root].subtransforms
-                             if WRITE_CACHE in t_id]
+    caching_transform_ids = [
+        t_id for root in roots for t_id in transforms[root].subtransforms
+        if WRITE_CACHE in t_id
+    ]
 
     # Get the IDs of the unbounded sources.
     required_transform_labels = [src.full_label for src in sources]
-    unbounded_source_ids = [k for k, v in transforms.items()
-                            if v.unique_name in required_transform_labels]
+    unbounded_source_ids = [
+        k for k,
+        v in transforms.items() if v.unique_name in required_transform_labels
+    ]
 
     # The required transforms are the tranforms that we want to cut out of
     # the pipeline_proto and insert into a new pipeline to return.
-    required_transform_ids = (roots + caching_transform_ids +
-                              unbounded_source_ids)
-    (t, p) = self._required_components(pipeline_proto, required_transform_ids,
-                                       set())
+    required_transform_ids = (
+        roots + caching_transform_ids + unbounded_source_ids)
+    (t, p) = self._required_components(
+        pipeline_proto, required_transform_ids, set())
 
     def set_proto_map(proto_map, new_value):
       proto_map.clear()
@@ -309,17 +327,19 @@ class PipelineInstrument(object):
     pipeline_to_execute.root_transform_ids[:] = roots
     set_proto_map(pipeline_to_execute.components.transforms, t)
     set_proto_map(pipeline_to_execute.components.pcollections, p)
-    set_proto_map(pipeline_to_execute.components.coders,
-                  context.to_runner_api().coders)
-    set_proto_map(pipeline_to_execute.components.windowing_strategies,
-                  context.to_runner_api().windowing_strategies)
+    set_proto_map(
+        pipeline_to_execute.components.coders, context.to_runner_api().coders)
+    set_proto_map(
+        pipeline_to_execute.components.windowing_strategies,
+        context.to_runner_api().windowing_strategies)
 
     # Cut out all subtransforms in the root that aren't the required transforms.
     for root_id in roots:
       root = pipeline_to_execute.components.transforms[root_id]
       root.subtransforms[:] = [
           transform_id for transform_id in root.subtransforms
-          if transform_id in pipeline_to_execute.components.transforms]
+          if transform_id in pipeline_to_execute.components.transforms
+      ]
 
     return pipeline_to_execute
 
@@ -399,7 +419,6 @@ class PipelineInstrument(object):
 
     class InstrumentVisitor(PipelineVisitor):
       """Visitor utilizes cache to instrument the pipeline."""
-
       def __init__(self, pin):
         self._pin = pin
 
@@ -419,22 +438,25 @@ class PipelineInstrument(object):
     cacheable_inputs.update(unbounded_source_pcolls)
     # Create ReadCache transforms.
     for cacheable_input in cacheable_inputs:
-      self._read_cache(self._pipeline, cacheable_input,
-                       cacheable_input in unbounded_source_pcolls)
+      self._read_cache(
+          self._pipeline,
+          cacheable_input,
+          cacheable_input in unbounded_source_pcolls)
     # Replace/wire inputs w/ cached PCollections from ReadCache transforms.
     self._replace_with_cached_inputs(self._pipeline)
 
     # Write cache for all cacheables.
     for _, cacheable in self.cacheables.items():
-      self._write_cache(self._pipeline, cacheable['pcoll'],
-                        ignore_unbounded_reads=True)
+      self._write_cache(
+          self._pipeline, cacheable['pcoll'], ignore_unbounded_reads=True)
 
     # Instrument the background caching pipeline if we can.
     if self.has_unbounded_sources:
       for source in self._unbounded_sources:
-        self._write_cache(self._background_caching_pipeline,
-                          source.outputs[None],
-                          output_as_extended_target=False)
+        self._write_cache(
+            self._background_caching_pipeline,
+            source.outputs[None],
+            output_as_extended_target=False)
 
       class TestStreamVisitor(PipelineVisitor):
         def __init__(self):
@@ -450,15 +472,15 @@ class PipelineInstrument(object):
 
       v = TestStreamVisitor()
       self._pipeline.visit(v)
-      pipeline_proto = self._pipeline.to_runner_api(return_context=False,
-                                                    use_fake_coders=True)
+      pipeline_proto = self._pipeline.to_runner_api(
+          return_context=False, use_fake_coders=True)
       test_stream_id = ''
       for t_id, t in pipeline_proto.components.transforms.items():
         if t.unique_name == v.test_stream:
           test_stream_id = t_id
           break
-      self._pruned_pipeline_proto = self.prune_subgraph_for(self._pipeline,
-                                                            [test_stream_id])
+      self._pruned_pipeline_proto = self.prune_subgraph_for(
+          self._pipeline, [test_stream_id])
       self._pipeline = beam.Pipeline.from_runner_api(
           proto=self._pruned_pipeline_proto,
           runner=self._pipeline.runner,
@@ -472,9 +494,7 @@ class PipelineInstrument(object):
     of cacheable PCollections between these 2 instances by replacing 'pcoll'
     fields in the cacheable dictionary with ones from the running instance.
     """
-
     class PreprocessVisitor(PipelineVisitor):
-
       def __init__(self, pin):
         self._pin = pin
 
@@ -510,8 +530,12 @@ class PipelineInstrument(object):
     v = PreprocessVisitor(self)
     self._pipeline.visit(v)
 
-  def _write_cache(self, pipeline, pcoll, output_as_extended_target=True,
-                   ignore_unbounded_reads=False):
+  def _write_cache(
+      self,
+      pipeline,
+      pcoll,
+      output_as_extended_target=True,
+      ignore_unbounded_reads=False):
     """Caches a cacheable PCollection.
 
     For the given PCollection, by appending sub transform part that materialize
@@ -554,13 +578,18 @@ class PipelineInstrument(object):
       # puts the element into the correct window then emits the value to
       # downstream transforms.
       class Reify(beam.DoFn):
-        def process(self, e, w=beam.DoFn.WindowParam, p=beam.DoFn.PaneInfoParam,
-                    t=beam.DoFn.TimestampParam):
+        def process(
+            self,
+            e,
+            w=beam.DoFn.WindowParam,
+            p=beam.DoFn.PaneInfoParam,
+            t=beam.DoFn.TimestampParam):
           yield {'value': e, 'timestamp': t, 'windows': [w], 'pane_info': p}
 
-      extended_target = (pcoll
-                         | label + 'reify' >> beam.ParDo(Reify())
-                         | label >> cache.WriteCache(self._cache_manager, key))
+      extended_target = (
+          pcoll
+          | label + 'reify' >> beam.ParDo(Reify())
+          | label >> cache.WriteCache(self._cache_manager, key))
       if output_as_extended_target:
         self._extended_targets.add(extended_target)
 
@@ -581,9 +610,10 @@ class PipelineInstrument(object):
     # Can only read from cache when the cache with expected key exists and its
     # computation has been completed.
     is_cached = self._cache_manager.exists('full', key)
-    is_computed = (pcoll in self._runner_pcoll_to_user_pcoll and
-                   self._runner_pcoll_to_user_pcoll[pcoll] in
-                   ie.current_env().computed_pcollections)
+    is_computed = (
+        pcoll in self._runner_pcoll_to_user_pcoll and
+        self._runner_pcoll_to_user_pcoll[pcoll] in
+        ie.current_env().computed_pcollections)
     if ((is_cached and is_computed) or is_unbounded_source_output):
       if key not in self._cached_pcoll_read:
         # Mutates the pipeline with cache read transform attached
@@ -594,6 +624,7 @@ class PipelineInstrument(object):
         class Unreify(beam.DoFn):
           def process(self, e):
             yield beam.window.WindowedValue(**e)
+
         pcoll_from_cache = (
             pipeline
             | '{}{}'.format(READ_CACHE, key) >> cache.ReadCache(
@@ -616,6 +647,7 @@ class PipelineInstrument(object):
     # If the pipeline has unbounded sources, then we want to force all cache
     # reads to go through the TestStream (even if they are bounded sources).
     if self.has_unbounded_sources:
+
       class CacheableUnboundedPCollectionVisitor(PipelineVisitor):
         def __init__(self, pin):
           self._pin = pin
@@ -662,7 +694,6 @@ class PipelineInstrument(object):
       """Visitor wires cache read as inputs to replace corresponding original
       input PCollections in pipeline.
       """
-
       def __init__(self, pin):
         """Initializes with a PipelineInstrument."""
         self._pin = pin
@@ -697,8 +728,8 @@ class PipelineInstrument(object):
 
   def _cacheable_key(self, pcoll):
     """Gets the key a cacheable PCollection is tracked within the instrument."""
-    return cacheable_key(pcoll, self.pcolls_to_pcoll_id,
-                         self._pcoll_version_map)
+    return cacheable_key(
+        pcoll, self.pcolls_to_pcoll_id, self._pcoll_version_map)
 
   def cache_key(self, pcoll):
     """Gets the identifier of a cacheable PCollection in cache.
@@ -715,9 +746,9 @@ class PipelineInstrument(object):
     """
     cacheable = self.cacheables.get(self._cacheable_key(pcoll), None)
     if cacheable:
-      return '_'.join((cacheable['var'],
-                       cacheable['version'],
-                       cacheable['producer_version']))
+      return '_'.join((
+          cacheable['var'], cacheable['version'],
+          cacheable['producer_version']))
     return ''
 
   def cacheable_var_by_pcoll_id(self, pcoll_id):
@@ -820,14 +851,12 @@ def has_unbounded_sources(pipeline):
 
 def unbounded_sources(pipeline):
   """Returns a pipeline's replaceable unbounded sources."""
-
   class CheckUnboundednessVisitor(PipelineVisitor):
     """Visitor checks if there are any unbounded read sources in the Pipeline.
 
     Visitor visits all nodes and checks if it is an instance of
     `REPLACEABLE_UNBOUNDED_SOURCES`.
     """
-
     def __init__(self):
       self.unbounded_sources = []
 
@@ -853,7 +882,6 @@ def pcolls_to_pcoll_id(pipeline, original_context):
   Returns:
     (dict from str to str) a dict mapping str(pcoll) to pcoll_id.
   """
-
   class PCollVisitor(PipelineVisitor):
     """"A visitor that records input and output values to be replaced.
 
@@ -863,7 +891,6 @@ def pcolls_to_pcoll_id(pipeline, original_context):
     We cannot update input and output values while visiting since that
     results in validation errors.
     """
-
     def __init__(self):
       self.pcolls_to_pcoll_id = {}
 
@@ -889,6 +916,7 @@ def watch_sources(pipeline):
   """
 
   retrieved_user_pipeline = user_pipeline(pipeline)
+
   class CacheableUnboundedPCollectionVisitor(PipelineVisitor):
     def __init__(self):
       self.unbounded_pcolls = set()
@@ -897,8 +925,8 @@ def watch_sources(pipeline):
       self.visit_transform(transform_node)
 
     def visit_transform(self, transform_node):
-      if isinstance(transform_node.transform,
-                    REPLACEABLE_UNBOUNDED_SOURCES):
+      if isinstance(transform_node.transform, REPLACEABLE_UNBOUNDED_SOURCES):
         for pcoll in transform_node.outputs.values():
           ie.current_env().watch({'synthetic_var_' + str(id(pcoll)): pcoll})
+
   retrieved_user_pipeline.visit(CacheableUnboundedPCollectionVisitor())

@@ -76,9 +76,11 @@ class FileRecordsBuilder(object):
 
   def add_element(self, element, event_time_secs, processing_time_secs):
     element_payload = TestStreamPayload.Event.AddElements(
-        elements=[TestStreamPayload.TimestampedElement(
-            encoded_element=self._coder.encode(element),
-            timestamp=Timestamp.of(event_time_secs).micros)])
+        elements=[
+            TestStreamPayload.TimestampedElement(
+                encoded_element=self._coder.encode(element),
+                timestamp=Timestamp.of(event_time_secs).micros)
+        ])
     record = TestStreamFileRecord(
         element_event=element_payload,
         processing_time=Timestamp.of(processing_time_secs).to_proto())

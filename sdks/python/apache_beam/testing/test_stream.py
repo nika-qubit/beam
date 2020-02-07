@@ -56,13 +56,12 @@ __all__ = [
     'WatermarkEvent',
     'ProcessingTimeEvent',
     'TestStream',
-    ]
+]
 
 
 @total_ordering
 class Event(with_metaclass(ABCMeta, object)):  # type: ignore[misc]
   """Test stream event to be emitted during execution of a TestStream."""
-
   @abstractmethod
   def __eq__(self, other):
     raise NotImplementedError
@@ -86,17 +85,20 @@ class Event(with_metaclass(ABCMeta, object)):  # type: ignore[misc]
   @staticmethod
   def from_runner_api(proto, element_coder):
     if proto.HasField('element_event'):
-      return ElementEvent(
-          [TimestampedValue(
+      return ElementEvent([
+          TimestampedValue(
               element_coder.decode(tv.encoded_element),
               timestamp.Timestamp(micros=1000 * tv.timestamp))
-           for tv in proto.element_event.elements])
+          for tv in proto.element_event.elements
+      ])
     elif proto.HasField('watermark_event'):
-      return WatermarkEvent(timestamp.Timestamp(
-          micros=1000 * proto.watermark_event.new_watermark))
+      return WatermarkEvent(
+          timestamp.Timestamp(
+              micros=1000 * proto.watermark_event.new_watermark))
     elif proto.HasField('processing_time_event'):
-      return ProcessingTimeEvent(Duration(
-          micros=1000 * proto.processing_time_event.advance_duration))
+      return ProcessingTimeEvent(
+          timestamp.Duration(
+              micros=1000 * proto.processing_time_event.advance_duration))
     else:
       raise ValueError(
           'Unknown TestStream Event type: %s' % proto.WhichOneof('event'))
@@ -104,7 +106,6 @@ class Event(with_metaclass(ABCMeta, object)):  # type: ignore[misc]
 
 class ElementEvent(Event):
   """Element-producing test stream event."""
-
   def __init__(self, timestamped_values, tag=None):
     self.timestamped_values = timestamped_values
     self.tag = tag
@@ -113,8 +114,9 @@ class ElementEvent(Event):
     if not isinstance(other, ElementEvent):
       raise TypeError
 
-    return (self.timestamped_values == other.timestamped_values and
-            self.tag == other.tag)
+    return (
+        self.timestamped_values == other.timestamped_values and
+        self.tag == other.tag)
 
   def __hash__(self):
     return hash(self.timestamped_values)
@@ -132,16 +134,17 @@ class ElementEvent(Event):
                 beam_runner_api_pb2.TestStreamPayload.TimestampedElement(
                     encoded_element=element_coder.encode(tv.value),
                     timestamp=tv.timestamp.micros // 1000)
-                for tv in self.timestamped_values]))
+                for tv in self.timestamped_values
+            ]))
 
   def __repr__(self):
-    return 'ElementEvent: <{}, {}>'.format(
-        [(e.value, e.timestamp) for e in self.timestamped_values], self.tag)
+    return 'ElementEvent: <{}, {}>'.format([(e.value, e.timestamp)
+                                            for e in self.timestamped_values],
+                                           self.tag)
 
 
 class WatermarkEvent(Event):
   """Watermark-advancing test stream event."""
-
   def __init__(self, new_watermark, tag=None):
     self.new_watermark = timestamp.Timestamp.of(new_watermark)
     self.tag = tag
@@ -163,16 +166,15 @@ class WatermarkEvent(Event):
 
   def to_runner_api(self, unused_element_coder):
     return beam_runner_api_pb2.TestStreamPayload.Event(
-        watermark_event
-        =beam_runner_api_pb2.TestStreamPayload.Event.AdvanceWatermark(
-            new_watermark=self.new_watermark.micros // 1000))
+        watermark_event=beam_runner_api_pb2.TestStreamPayload.Event.
+        AdvanceWatermark(new_watermark=self.new_watermark.micros // 1000))
 
   def __repr__(self):
     return 'WatermarkEvent: <{}, {}>'.format(self.new_watermark, self.tag)
 
+
 class ProcessingTimeEvent(Event):
   """Processing time-advancing test stream event."""
-
   def __init__(self, advance_by):
     self.advance_by = Duration.of(advance_by)
 
@@ -193,9 +195,8 @@ class ProcessingTimeEvent(Event):
 
   def to_runner_api(self, unused_element_coder):
     return beam_runner_api_pb2.TestStreamPayload.Event(
-        processing_time_event
-        =beam_runner_api_pb2.TestStreamPayload.Event.AdvanceProcessingTime(
-            advance_duration=self.advance_by.micros // 1000))
+        processing_time_event=beam_runner_api_pb2.TestStreamPayload.Event.
+        AdvanceProcessingTime(advance_duration=self.advance_by.micros // 1000))
 
   def __repr__(self):
     return 'ProcessingTimeEvent: <{}>'.format(self.advance_by)
@@ -208,9 +209,8 @@ class TestStream(PTransform):
   time. After all of the specified elements are emitted, ceases to produce
   output.
   """
-
-  def __init__(self, coder=coders.FastPrimitivesCoder(), events=None,
-               output_tags=None):
+  def __init__(
+      self, coder=coders.FastPrimitivesCoder(), events=None, output_tags=None):
     super(TestStream, self).__init__()
     assert coder is not None
     self.coder = coder
@@ -314,6 +314,7 @@ class TestStream(PTransform):
             events=[e.to_runner_api(self.coder) for e in self._events],
             output_tags=sorted(str(t) for t in self.output_tags)))
 
+  @staticmethod
   @PTransform.register_urn(
       common_urns.primitives.TEST_STREAM.urn,
       beam_runner_api_pb2.TestStreamPayload)
@@ -322,8 +323,8 @@ class TestStream(PTransform):
     return TestStream(
         coder=coder,
         events=[Event.from_runner_api(e, coder) for e in payload.events],
-        output_tags=set(t if t != 'None' else None
-                        for t in payload.output_tags))
+        output_tags=set(
+            t if t != 'None' else None for t in payload.output_tags))
 
 
 class _TimingInfoReporter(PTransform):
@@ -350,16 +351,14 @@ class _TimingInfo(object):
     return self._watermark
 
   def __repr__(self):
-    return '({}, {}, {})'.format(self.event_timestamp,
-                                 self.processing_time,
-                                 self.watermark)
+    return '({}, {}, {})'.format(
+        self.event_timestamp, self.processing_time, self.watermark)
 
 
 class _WatermarkEventGenerator(beam.DoFn):
   # Used to return the initial timing information.
   EXECUTE_ONCE_STATE = beam.transforms.userstate.BagStateSpec(
-      name='execute_once_state',
-      coder=beam.coders.FastPrimitivesCoder())
+      name='execute_once_state', coder=beam.coders.FastPrimitivesCoder())
   WATERMARK_TRACKER = TimerSpec('watermark_tracker', TimeDomain.REAL_TIME)
 
   def __init__(self, output_tag, sample_resolution_sec=0.1):
@@ -381,11 +380,13 @@ class _WatermarkEventGenerator(beam.DoFn):
     yield ProcessingTimeEvent(self._sample_resolution_sec)
     yield WatermarkEvent(MIN_TIMESTAMP)
 
-  def process(self, e,
-              timestamp=beam.DoFn.TimestampParam,
-              window=beam.DoFn.WindowParam,
-              watermark_tracker=beam.DoFn.TimerParam(WATERMARK_TRACKER),
-              execute_once_state=beam.DoFn.StateParam(EXECUTE_ONCE_STATE)):
+  def process(
+      self,
+      e,
+      timestamp=beam.DoFn.TimestampParam,
+      window=beam.DoFn.WindowParam,
+      watermark_tracker=beam.DoFn.TimerParam(WATERMARK_TRACKER),
+      execute_once_state=beam.DoFn.StateParam(EXECUTE_ONCE_STATE)):
 
     _, (element, timing_info) = e
 
@@ -412,11 +413,12 @@ class _TestStreamEventGenerator(beam.DoFn):
 
   def finish_bundle(self):
     if self.timing_events:
-      yield WindowedValue(self.timing_events, timestamp=0,
-                          windows=[beam.window.GlobalWindow()])
+      yield WindowedValue(
+          self.timing_events, timestamp=0, windows=[beam.window.GlobalWindow()])
 
     if self.elements:
-      yield WindowedValue([ElementEvent(self.elements)], timestamp=0,
+      yield WindowedValue([ElementEvent(self.elements)],
+                          timestamp=0,
                           windows=[beam.window.GlobalWindow()])
 
   def process(self, e, timestamp=beam.DoFn.TimestampParam):
@@ -445,10 +447,11 @@ class _TestStreamFileRecordGenerator(beam.DoFn):
           watermark_event = TestStreamPayload.Event.AdvanceWatermark(
               new_watermark=int(e.new_watermark))
           processing_time_proto = processing_time.to_proto()
-          record = TestStreamFileRecord(watermark_event=watermark_event,
-                                        processing_time=processing_time_proto)
-          yield WindowedValue(record, timestamp=0,
-                              windows=[beam.window.GlobalWindow()])
+          record = TestStreamFileRecord(
+              watermark_event=watermark_event,
+              processing_time=processing_time_proto)
+          yield WindowedValue(
+              record, timestamp=0, windows=[beam.window.GlobalWindow()])
 
     if self.elements:
       elements = []
@@ -461,10 +464,10 @@ class _TestStreamFileRecordGenerator(beam.DoFn):
         elements.append(element)
 
       element_event = TestStreamPayload.Event.AddElements(elements=elements)
-      record = TestStreamFileRecord(element_event=element_event,
-                                    processing_time=processing_time_proto)
-      yield WindowedValue(record, timestamp=0,
-                          windows=[beam.window.GlobalWindow()])
+      record = TestStreamFileRecord(
+          element_event=element_event, processing_time=processing_time_proto)
+      yield WindowedValue(
+          record, timestamp=0, windows=[beam.window.GlobalWindow()])
 
   def process(self, e, timestamp=beam.DoFn.TimestampParam):
     element, timing_info = e
@@ -477,8 +480,8 @@ class _TestStreamFileRecordGenerator(beam.DoFn):
     elif isinstance(element, TestStreamFileHeader):
       yield element
     else:
-      self.elements.append((TimestampedValue(element, timestamp),
-                            timing_info.processing_time))
+      self.elements.append(
+          (TimestampedValue(element, timestamp), timing_info.processing_time))
 
 
 class ReverseTestStream(PTransform):
@@ -486,32 +489,37 @@ class ReverseTestStream(PTransform):
   EVENTS = 'events'
   SERIALIZED = 'serialized'
 
-  def __init__(self, sample_resolution_sec, output_tag, coder=None,
-               output_format=None):
+  def __init__(
+      self, sample_resolution_sec, output_tag, coder=None, output_format=None):
     self._sample_resolution_sec = sample_resolution_sec
     self._output_tag = output_tag
     self._output_format = output_format if output_format else self.EVENTS
     self._coder = coder if coder else beam.coders.FastPrimitivesCoder()
 
   def expand(self, pcoll):
-    generator = (_TestStreamFileRecordGenerator(coder=self._coder)
-                 if (self._output_format == ReverseTestStream.FILE_RECORD or
-                     self._output_format == ReverseTestStream.SERIALIZED)
-                 else _TestStreamEventGenerator())
+    generator = (
+        _TestStreamFileRecordGenerator(coder=self._coder) if (
+            self._output_format == ReverseTestStream.FILE_RECORD or
+            self._output_format == ReverseTestStream.SERIALIZED) else
+        _TestStreamEventGenerator())
 
-    ret = (pcoll
-           | beam.WindowInto(beam.window.GlobalWindows())
-           | 'initial timing' >> _TimingInfoReporter()
-           | beam.Map(lambda x: (0, x))
-           | beam.ParDo(_WatermarkEventGenerator(
-               output_tag=self._output_tag,
-               sample_resolution_sec=self._sample_resolution_sec))
-           | 'timing info for watermarks' >> _TimingInfoReporter()
-           | beam.ParDo(generator))
+    ret = (
+        pcoll
+        | beam.WindowInto(beam.window.GlobalWindows())
+        | 'initial timing' >> _TimingInfoReporter()
+        | beam.Map(lambda x: (0, x))
+        | beam.ParDo(
+            _WatermarkEventGenerator(
+                output_tag=self._output_tag,
+                sample_resolution_sec=self._sample_resolution_sec))
+        | 'timing info for watermarks' >> _TimingInfoReporter()
+        | beam.ParDo(generator))
 
     if self._output_format == ReverseTestStream.SERIALIZED:
+
       def serializer(e):
         return e.SerializeToString()
+
       ret = ret | 'serializer' >> beam.Map(serializer)
 
     return ret

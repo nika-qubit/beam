@@ -42,7 +42,6 @@ def _get_watched_pcollections_with_variable_names():
 
 
 class InteractiveBeamTest(unittest.TestCase):
-
   def setUp(self):
     self._var_in_class_instance = 'a var in class instance, not directly used'
     ie.new_env()
@@ -84,12 +83,10 @@ class InteractiveBeamTest(unittest.TestCase):
     # pylint: disable=range-builtin-not-iterating
     pcoll = p | 'Create' >> beam.Create(range(10))
     # The pcoll is not watched since watch(locals()) is not explicitly called.
-    self.assertFalse(
-        pcoll in _get_watched_pcollections_with_variable_names())
+    self.assertFalse(pcoll in _get_watched_pcollections_with_variable_names())
     # The call of show watches pcoll.
     ib.show(pcoll)
-    self.assertTrue(
-        pcoll in _get_watched_pcollections_with_variable_names())
+    self.assertTrue(pcoll in _get_watched_pcollections_with_variable_names())
     # The name of pcoll is made up by show.
     self.assertEqual(
         'PCollection_Create/Map_decode_.None_',
