@@ -256,17 +256,16 @@ class StreamingCacheTest(unittest.TestCase):
     """
 
     # Units here are in seconds.
-    # yapf: disable
     test_stream = (TestStream()
-                   .advance_watermark_to(0, tag='records')
-                   .advance_processing_time(5)
-                   .add_elements(['a', 'b', 'c'], tag='records')
-                   .advance_watermark_to(10, tag='records')
-                   .advance_processing_time(1)
-                   .add_elements([TimestampedValue('1', 15),
-                                  TimestampedValue('2', 15),
-                                  TimestampedValue('3', 15)], tag='records'))
-    # yapf: enable
+        .advance_watermark_to(0, tag='records')
+        .advance_processing_time(5)
+        .add_elements(['a', 'b', 'c'], tag='records')
+        .advance_watermark_to(10, tag='records')
+        .advance_processing_time(1)
+        .add_elements([TimestampedValue('1', 15),
+                       TimestampedValue('2', 15),
+                       TimestampedValue('3', 15)],
+                      tag='records'))  # yapf: disable
 
     coder = SafeFastPrimitivesCoder()
     cache = StreamingCache(cache_dir=None, sample_resolution_sec=1.0)
@@ -331,7 +330,6 @@ class StreamingCacheTest(unittest.TestCase):
     NUMBERS_TAG = 'numbers'
 
     # Units here are in seconds.
-    # yapf: disable
     test_stream = (TestStream()
         .advance_watermark_to(0, tag=LETTERS_TAG)
         .advance_processing_time(5)
@@ -340,8 +338,8 @@ class StreamingCacheTest(unittest.TestCase):
         .advance_processing_time(1)
         .add_elements([TimestampedValue('1', 15),
                        TimestampedValue('2', 15),
-                       TimestampedValue('3', 15)], tag=NUMBERS_TAG))
-    # yapf: disable
+                       TimestampedValue('3', 15)],
+                      tag=NUMBERS_TAG))  # yapf: disable
 
     cache = StreamingCache(cache_dir=None, sample_resolution_sec=1.0)
 
