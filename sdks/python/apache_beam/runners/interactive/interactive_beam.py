@@ -45,6 +45,58 @@ from apache_beam.runners.interactive import pipeline_instrument as pi
 from apache_beam.runners.interactive.display import pipeline_graph
 from apache_beam.runners.interactive.display.pcoll_visualization import visualize
 from apache_beam.runners.interactive.display.pcoll_visualization import to_dataframe
+from apache_beam.runners.interactive.options import interactive_options
+
+
+class Options(interactive_options.InteractiveOptions):
+  """Options that guide how Interactive Beam works."""
+  @property
+  def capturable_sources(self):
+    """Interactive Beam automatically captures data from sources in this set."""
+    return self.capture_control._capturable_sources
+
+  @property
+  def capture_duration(self):
+    """The data capture of sources ends as soon as the background caching job
+    has run for this long."""
+    return self.capture_control._capture_duration
+
+  @capture_duration.setter
+  def capture_duration(self, value):
+    """Sets the capture duration as a timedelta.
+
+    Example::
+
+      # Sets the capture duration limit to 10 seconds.
+      interactive_beam.options.capture_duration = timedelta(seconds=10)
+      # Evicts all captured data if there is any.
+      interactive_beam.evict_captured_data()
+      # The next PCollection evaluation will capture fresh data from sources,
+      # and the data captured will be replayed until another eviction.
+      interactive_beam.collect(some_pcoll)
+    """
+    self.capture_control._capture_duration = value
+
+  @property
+  def capture_size(self):
+    """The data capture of sources ends as soon as the size (in bytes) of data
+    captured from capturable sources reaches the limit."""
+    return self.capture_control._capture_size
+
+  @capture_size.setter
+  def capture_size(self, value):
+    """Sets the capture size in bytes.
+
+    Example::
+
+      # Sets the capture size limit to 1GB.
+      interactive_beam.options.capture_size = 1e9
+    """
+    self.capture_control._capture_size = value
+
+
+# Users can set options to guide how Interactive Beam works.
+options = Options()
 
 
 def watch(watchable):
@@ -86,7 +138,7 @@ def watch(watchable):
 
     Then you can use::
 
-      visualize(init_pcoll)
+      show(init_pcoll)
 
     To visualize data from init_pcoll once the pipeline is executed.
   """
@@ -100,9 +152,9 @@ def show(*pcolls, visualize_data=False):
 
   By default, the visualization contains data tables rendering data from given
   pcolls separately as if they are converted into dataframes. If visualize_data
-  is True, there will be a button that allows a more dive-in widget and
-  statistically overview widget of the data. Otherwise, those 2 data
-  visualization widgets will not be displayed.
+  is True, there will be a more dive-in widget and statistically overview widget
+  of the data. Otherwise, those 2 data visualization widgets will not be
+  displayed.
 
   Ad hoc builds a pipeline fragment including only transforms that are
   necessary to produce data for given PCollections pcolls, runs the pipeline
@@ -194,8 +246,6 @@ def show(*pcolls, visualize_data=False):
   result.wait_until_finish()
 
   # If just in ipython shell, plotting once when the computation is completed.
-  # Note there would be no web widgets in an ipython shell, thus the toggle
-  # data visualization does not need to be passed along.
   if ie.current_env().is_in_ipython and not ie.current_env().is_in_notebook:
     for pcoll in pcolls:
       visualize(pcoll)
@@ -296,3 +346,13 @@ def show_graph(pipeline):
   """Shows the current pipeline shape of a given Beam pipeline as a DAG.
   """
   pipeline_graph.PipelineGraph(pipeline).display_graph()
+
+
+def evict_captured_data():
+  """Forcefully evicts all captured replayable data.
+
+  Once invoked, Interactive Beam will capture new data based on the guidance of
+  options the next time it evaluates/visualizes PCollections or runs pipelines.
+  """
+  from apache_beam.runners.interactive.options import capture_control
+  capture_control.evict_captured_data()
