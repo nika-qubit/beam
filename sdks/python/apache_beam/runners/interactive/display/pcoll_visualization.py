@@ -38,7 +38,6 @@ from apache_beam.runners.interactive import pipeline_instrument as instr
 
 try:
   import jsons  # pylint: disable=import-error
-  import ipywidgets as widgets
   from IPython import get_ipython  # pylint: disable=import-error
   from IPython.core.display import HTML  # pylint: disable=import-error
   from IPython.core.display import Javascript  # pylint: disable=import-error
@@ -128,9 +127,8 @@ def visualize(pcoll,
 
   If dynamic_plotting is not enabled (by default), None is returned.
 
-  If display_facets is True, the facets widgets will be rendered initially,
-  otherwise, the facets widgets will only be rendered on demand as the user
-  clicks on a toggle button.
+  If display_facets is True, the facets widgets will be rendered. Otherwise, the
+  facets widgets will not be rendered.
 
   The function is experimental. For internal use only; no
   backwards-compatibility guarantees.
@@ -138,7 +136,6 @@ def visualize(pcoll,
   if not _pcoll_visualization_ready:
     return None
   pv = PCollectionVisualization(pcoll,
-                                dynamic_plotting_interval,
                                 display_facets)
   if ie.current_env().is_in_notebook:
     pv.display()
@@ -152,7 +149,7 @@ def visualize(pcoll,
     logging.getLogger('timeloop').disabled = True
     tl = Timeloop()
 
-    def dynamic_plotting(pcoll, pv, tl):
+    def dynamic_plotting(pcoll, pv, tl, display_facets):
       @tl.job(interval=timedelta(seconds=dynamic_plotting_interval))
       def continuous_update_display():  # pylint: disable=unused-variable
         # Always creates a new PCollVisualization instance when the
@@ -161,7 +158,8 @@ def visualize(pcoll,
         # PCollectionVisualization created at this level doesn't need dynamic
         # plotting interval information when instantiated because it's already
         # in dynamic plotting logic.
-        updated_pv = PCollectionVisualization(pcoll)
+        updated_pv = PCollectionVisualization(pcoll,
+                                              display_facets=display_facets)
         updated_pv.display(updating_pv=pv)
         if ie.current_env().is_terminated(pcoll.pipeline):
           try:
@@ -173,7 +171,7 @@ def visualize(pcoll,
       tl.start()
       return tl
 
-    return dynamic_plotting(pcoll, pv, tl)
+    return dynamic_plotting(pcoll, pv, tl, display_facets)
   return None
 
 
@@ -187,7 +185,6 @@ class PCollectionVisualization(object):
 
   def __init__(self,
                pcoll,
-               dynamic_plotting_interval=None,
                display_facets=False):
     assert _pcoll_visualization_ready, (
         'Dependencies for PCollection visualization are not available. Please '
@@ -197,12 +194,6 @@ class PCollectionVisualization(object):
     assert isinstance(pcoll, pvalue.PCollection), (
         'pcoll should be apache_beam.pvalue.PCollection')
     self._pcoll = pcoll
-    # This can be populated so that independent toggle-able facets widgets can
-    # be dynamic plotted. It means one can start and stop dynamic plotting of
-    # the 2 facets widgets on toggle from whatever visualization state without
-    # worrying about whether to render new web elements or update existing ones,
-    # or worrying about leaking computing resources through multiple toggles.
-    self._dynamic_plotting_interval = dynamic_plotting_interval
     # This allows us to access cache key and other meta data about the pipeline
     # whether it's the pipeline defined in user code or a copy of that pipeline.
     # Thus, this module doesn't need any other user input but the PCollection
@@ -218,16 +209,8 @@ class PCollectionVisualization(object):
     self._overview_display_id = 'facets_overview_{}_{}'.format(self._cache_key,
                                                                id(self))
     self._df_display_id = 'df_{}_{}'.format(self._cache_key, id(self))
-    # Whether the facets-dive and facets-overview widgets should
-    # be: True - rendered and visible initially; or False - not rendered and
-    # not visible. This assignment works as an initial state of displaying a
-    # PCollection's visualization.
-    self._facets_displayed = display_facets
-    # Call self._dynamic_facets_handle.stop() to stop the dynamic plotting of
-    # standalone toggle-able facets widgets. If this is None, it does not mean
-    # the facets widgets are not rendered. It could just be there is no dynamic
-    # plotting.
-    self._dynamic_facets_handle = None
+    # Whether facets widgets should be displayed.
+    self._display_facets = display_facets
 
   def display_plain_text(self):
     """Displays a head sample of the normalized PCollection data.
@@ -259,10 +242,7 @@ class PCollectionVisualization(object):
     data table. Each part is assigned an auto-generated unique display id
     (the uniqueness is guaranteed throughout the lifespan of the PCollection
     variable).
-    A toggle button is always displayed to toggle the facets widgets.
     """
-    # Ensures that dive, overview and table render the same data because the
-    # materialized PCollection data might being updated continuously.
     data = self._to_dataframe()
     if updating_pv:
       # Only updates when data is not empty. Otherwise, consider it a bad
@@ -271,87 +251,14 @@ class PCollectionVisualization(object):
         _LOGGER.debug('Skip a visualization update due to empty data.')
       else:
         self._display_dataframe(data, updating_pv._df_display_id)
+        if self._display_facets:
+          self._display_dive(data, updating_pv._dive_display_id)
+          self._display_overview(data, updating_pv._overview_display_id)
     else:
-      # Displays even if the data might be empty to create output anchors since
-      # this is the first iteration of a visualization.
       self._display_dataframe(data)
-      # if extension @jupyter-widgets/jupyterlab-manager is not installed and
-      # enabled, this will be displayed as plain text html.
-      self._display_facets_toggle(data)
-
-  def _display_facets_toggle(self, data):
-    w_toggle = widgets.Button(
-        description='Visualize Data',
-        disabled=False,
-        button_style='info',
-        tooltip='Visualize the data and its statistics interactively.')
-    w_output = widgets.Output()
-
-    def on_toggle_click(unused_event):
-      # The state is before the click. So on click, if the facets are displayed,
-      # the branch should make it not displayed by clearing up.
-      if self._facets_displayed:
-        try:
-          # If dynamic plotting, stop it since it's toggled to be hidden.
-          if self._dynamic_facets_handle:
-            self._dynamic_facets_handle.stop()
-        except RuntimeError:
-          # The job can only be stopped once. Ignore excessive stops.
-          pass
-        finally:
-          w_toggle.description = 'Visualize Data'
-          w_toggle.button_style = 'info'
-          w_toggle.tooltip = ('Visualize the data and its statistics'
-                              ' interactively.')
-          with w_output:
-            w_output.clear_output()
-          self._dynamic_facets_handle = None
-          self._facets_displayed = False
-      # On click, if the facets are not displayed, the branch should make it
-      # displayed by invoking the rendering logic.
-      else:
-        w_toggle.description = 'Hide Data Visualization'
-        w_toggle.button_style = 'success'
-        w_toggle.tooltip = 'Stop visualizing the data interactively.'
-        with w_output:
-          w_output.clear_output()
-          self._dynamic_facets_handle = self._display_facets(data)
-        self._facets_displayed = True
-
-    w_toggle.on_click(on_toggle_click)
-    display(w_toggle, w_output)
-    if self._facets_displayed:
-      self._facets_displayed = False
-      w_toggle.click()
-
-  def _display_facets(self, data):
-    # Create a display anchor with the initial display.
-    self._display_dive(data)
-    self._display_overview(data)
-    updating_pv = self
-
-    # If there is dynamic plotting interval configured, start dynamic plotting.
-    if self._dynamic_plotting_interval:
-      # Disables the verbose logging from timeloop.
-      logging.getLogger('timeloop').disabled = True
-      tl = Timeloop()
-
-      # pylint: disable=unused-variable
-      @tl.job(interval=timedelta(seconds=self._dynamic_plotting_interval))
-      def facets_only_dynamic_plotting():
-        updated_pv = PCollectionVisualization(self._pcoll)
-        updated_pv._display_dive(data, updating_pv._dive_display_id)
-        updated_pv._display_overview(data, updating_pv._overview_display_id)
-        if ie.current_env().is_terminated(self._pcoll.pipeline):
-          try:
-            tl.stop()
-          except RuntimeError:
-            # The job can only be stopped once. Ignore excessive stops.
-            pass
-      tl.start()
-      # Returns the handler that could be used to stop the dynamic plotting.
-      return tl
-    return None
+      if self._display_facets:
+        self._display_dive(data)
+        self._display_overview(data)
 
   def _display_dive(self, data, update=None):
     sprite_size = 32 if len(data.index) > 50000 else 64

@@ -121,46 +121,13 @@ class PipelineGraph(object):
     # type: () -> str
     return self._get_graph().to_string()
 
-  def display_graph(self, enable_toggle=True):
-    """Displays the graph generated.
-
-    Args:
-       enable_toggle: (bool) True - displays a toggle button to render and hide
-           the pipeline graph (hidden initially); False - always displays the
-           graph without a toggle button.
-    """
+  def display_graph(self):
+    """Displays the graph generated."""
     rendered_graph = self._renderer.render_pipeline_graph(self)
     if ie.current_env().is_in_notebook:
       try:
         from IPython.core import display
-        if enable_toggle:
-          import ipywidgets as widgets
-          w_toggle = widgets.Button(
-              description='Show Pipeline Graph',
-              disabled=False,
-              button_style='info',
-              tooltip=('Visualizes PCollections and PTransforms in the Pipeline'
-                       ' as a DAG.'))
-          w_output = widgets.Output()
-          def on_toggle_click(unused_event):
-            if w_toggle.description == 'Show Pipeline Graph':
-              with w_output:
-                w_output.clear_output()
-                display.display(display.HTML(rendered_graph))
-              w_toggle.description = 'Hide Pipeline Graph'
-              w_toggle.button_style = 'success'
-              w_toggle.tooltip = 'Hide the pipeline Graph rendered.'
-            else:
-              with w_output:
-                w_output.clear_output()
-              w_toggle.description = 'Show Pipeline Graph'
-              w_toggle.button_style = 'info'
-              w_toggle.tooltip = ('Visualizes PCollections and PTransforms in'
-                                  ' the Pipeline as a DAG.')
-          w_toggle.on_click(on_toggle_click)
-          display.display(w_toggle, w_output)
-        else:
-          display.display(display.HTML(rendered_graph))
+        display.display(display.HTML(rendered_graph))
       except ImportError:  # Unlikely to happen when is_in_notebook.
         logging.warning('Failed to import IPython display module when current '
                         'environment is in a notebook. Cannot display the '

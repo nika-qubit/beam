@@ -92,16 +92,16 @@ def watch(watchable):
   ie.current_env().watch(watchable)
 
 
-def show(*pcolls, display_data_exploration=False):
+def show(*pcolls, visualize_data=False):
   """Visualizes given PCollections in an interactive exploratory way if used
   within a notebook, or prints a heading sampled data if used within an ipython
   shell. Noop if used in a non-interactive environment.
 
   By default, the visualization contains data tables rendering data from given
-  pcolls separately as if they are converted into dataframes. If
-  display_data_exploration is False, there will be a button that allows a more
-  dive-in widget and statistically overview widget of the data to be toggled on
-  click. Otherwise, those 2 data exploration widgets will always be displayed.
+  pcolls separately as if they are converted into dataframes. If visualize_data
+  is True, there will be a button that allows a more dive-in widget and
+  statistically overview widget of the data. Otherwise, those 2 data
+  visualization widgets will not be displayed.
 
   Ad hoc builds a pipeline fragment including only transforms that are
   necessary to produce data for given PCollections pcolls, runs the pipeline
@@ -186,7 +186,7 @@ def show(*pcolls, display_data_exploration=False):
     for pcoll in pcolls:
       visualize(pcoll,
                 dynamic_plotting_interval=1,
-                display_facets=display_data_exploration)
+                display_facets=visualize_data)
 
   # Invoke wait_until_finish to ensure the blocking nature of this API without
   # relying on the run to be blocking.
@@ -194,7 +194,7 @@ def show(*pcolls, display_data_exploration=False):
 
   # If just in ipython shell, plotting once when the computation is completed.
   # Note there would be no web widgets in an ipython shell, thus the toggle
-  # data exploration does not need to be passed along.
+  # data visualization does not need to be passed along.
   if ie.current_env().is_in_ipython and not ie.current_env().is_in_notebook:
     for pcoll in pcolls:
       visualize(pcoll)
@@ -298,5 +298,4 @@ def head(pcoll, n=5):
 def show_graph(pipeline):
   """Shows the current pipeline shape of a given Beam pipeline as a DAG.
   """
-  pipeline_graph.PipelineGraph(pipeline).display_graph(
-      enable_toggle=False)
+  pipeline_graph.PipelineGraph(pipeline).display_graph()
