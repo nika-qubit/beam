@@ -26,7 +26,6 @@ to transform original pipeline into a one-shot pipeline with interactivity.
 from __future__ import absolute_import
 
 import apache_beam as beam
-from apache_beam.io.gcp.pubsub import ReadFromPubSub
 from apache_beam.pipeline import PipelineVisitor
 from apache_beam.portability.api import beam_runner_api_pb2
 from apache_beam.runners.interactive import cache_manager as cache
@@ -37,11 +36,6 @@ from apache_beam.testing import test_stream
 
 READ_CACHE = "_ReadCache_"
 WRITE_CACHE = "_WriteCache_"
-
-# Use a tuple to define the list of unbounded sources. It is not always feasible
-# to correctly find all the unbounded sources in the SDF world. This is
-# because SDF allows the source to dynamically create sources at runtime.
-REPLACEABLE_UNBOUNDED_SOURCES = (ReadFromPubSub, )
 
 
 class PipelineInstrument(object):
@@ -345,7 +339,7 @@ class PipelineInstrument(object):
 
   @property
   def has_unbounded_sources(self):
-    """Returns whether the pipeline has any `REPLACEABLE_UNBOUNDED_SOURCES`.
+    """Returns whether the pipeline has any capturable sources.
     """
     return len(self._unbounded_sources) > 0
 
@@ -426,7 +420,8 @@ class PipelineInstrument(object):
         self.visit_transform(transform_node)
 
       def visit_transform(self, transform_node):
-        if isinstance(transform_node.transform, REPLACEABLE_UNBOUNDED_SOURCES):
+        if isinstance(transform_node.transform,
+                      tuple(ie.current_env().options.capturable_sources)):
           unbounded_source_pcolls.update(transform_node.outputs.values())
         cacheable_inputs.update(self._pin._cacheable_inputs(transform_node))
 
@@ -552,13 +547,14 @@ class PipelineInstrument(object):
     if pcoll.pipeline is not pipeline:
       return
 
-    # Ignore the unbounded reads from REPLACEABLE_UNBOUNDED_SOURCES as these
-    # will be pruned out using the PipelineFragment later on.
+    # Ignore the unbounded reads from capturable sources as these will be pruned
+    # out using the PipelineFragment later on.
     if ignore_unbounded_reads:
       ignore = False
       producer = pcoll.producer
       while producer:
-        if isinstance(producer.transform, REPLACEABLE_UNBOUNDED_SOURCES):
+        if isinstance(producer.transform,
+                      tuple(ie.current_env().options.capturable_sources)):
           ignore = True
           break
         producer = producer.parent
@@ -854,8 +850,8 @@ def unbounded_sources(pipeline):
   class CheckUnboundednessVisitor(PipelineVisitor):
     """Visitor checks if there are any unbounded read sources in the Pipeline.
 
-    Visitor visits all nodes and checks if it is an instance of
-    `REPLACEABLE_UNBOUNDED_SOURCES`.
+    Visitor visits all nodes and checks if it is an instance of capturable
+    sources.
     """
     def __init__(self):
       self.unbounded_sources = []
@@ -864,7 +860,8 @@ def unbounded_sources(pipeline):
       self.visit_transform(transform_node)
 
     def visit_transform(self, transform_node):
-      if isinstance(transform_node.transform, REPLACEABLE_UNBOUNDED_SOURCES):
+      if isinstance(transform_node.transform,
+                    tuple(ie.current_env().options.capturable_sources)):
         self.unbounded_sources.append(transform_node)
 
   v = CheckUnboundednessVisitor()
@@ -925,7 +922,8 @@ def watch_sources(pipeline):
       self.visit_transform(transform_node)
 
     def visit_transform(self, transform_node):
-      if isinstance(transform_node.transform, REPLACEABLE_UNBOUNDED_SOURCES):
+      if isinstance(transform_node.transform,
+                    tuple(ie.current_env().options.capturable_sources)):
         for pcoll in transform_node.outputs.values():
           ie.current_env().watch({'synthetic_var_' + str(id(pcoll)): pcoll})
 

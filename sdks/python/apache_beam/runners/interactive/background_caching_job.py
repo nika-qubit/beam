@@ -31,7 +31,7 @@ caching job) and meets the following conditions:
 
 Once started, the background caching job runs asynchronously until it hits some
 cache size limit. Meanwhile, the main job and future main jobs from the pipeline
-will run using the deterministic replay-able cached events until they are
+will run using the deterministic replayable cached events until they are
 invalidated.
 """
 
@@ -67,15 +67,24 @@ class BackgroundCachingJob(object):
   def __init__(self, pipeline_result):
     self._pipeline_result = pipeline_result
     self._timer = threading.Timer(
-        ie.current_env()._streaming_cache_capture_duration.total_seconds(),
-        self._cancel)
+        ie.current_env().options.capture_duration.total_seconds(), self._cancel)
+    self._condition_checker = threading.Thread(
+        target=self._background_caching_job_condition_checker)
     self._timer.start()
+    self._condition_checker.start()
     self._timer_triggered = False
+    self._condition_checker_triggered = False
+
+  def _background_caching_job_condition_checker(self):
+    if ie.current_env().options.capture_control.is_capture_size_reached():
+      self._condition_checker_triggered = True
+      self.cancel()
 
   def is_done(self):
     return (
         self._pipeline_result.state is PipelineState.DONE or (
-            self._timer_triggered and self._pipeline_result.state in
+            self._timer_triggered or
+            self._condition_checker_triggered and self._pipeline_result.state in
             (PipelineState.CANCELLED, PipelineState.CANCELLING)))
 
   def is_running(self):
@@ -93,6 +102,9 @@ class BackgroundCachingJob(object):
     self._timer_triggered = False
     if self._timer.is_alive():
       self._timer.cancel()
+    if (not self._condition_checker_triggered and
+        self._condition_checker.is_alive()):
+      self._condition_checker.cancel()
 
   def _cancel(self):
     self._timer_triggered = True
@@ -115,8 +127,6 @@ def attempt_to_run_background_caching_job(runner, user_pipeline, options=None):
     attempt_to_cancel_background_caching_job(user_pipeline)
     # Cancel the gRPC server serving the test stream if there is one.
     attempt_to_stop_test_stream_service(user_pipeline)
-    # Evict all caches if there is any.
-    ie.current_env().cleanup()
     # TODO(BEAM-8335): refactor background caching job logic from
     # pipeline_instrument module to this module and aggregate tests.
     from apache_beam.runners.interactive import pipeline_instrument as instr
@@ -250,19 +260,18 @@ def is_source_to_cache_changed(
       _LOGGER.info(
           'Interactive Beam has detected you have unbounded sources '
           'in your pipeline. In order to have a deterministic replay '
-          'of your pipeline, a 60s segment will be recorded from '
-          'each of your sources.')
+          'of your pipeline: {}'.format(
+              ie.current_env().options.capture_control))
     else:
       _LOGGER.info(
           'Interactive Beam has detected a new streaming source was '
           'added to the pipeline. In order for the cached streaming '
           'data to start at the same time, all caches have been '
-          'cleared. A new 60s segment will be recorded from each of '
-          'your sources.')
+          'cleared. {}'.format(ie.current_env().options.capture_control))
 
+    ie.current_env().cleanup()
     ie.current_env().set_cached_source_signature(
         user_pipeline, current_signature)
-    ie.current_env().cleanup()
   return is_changed
 
 

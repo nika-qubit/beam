@@ -30,7 +30,6 @@ import atexit
 import importlib
 import logging
 import sys
-from datetime import timedelta
 
 import apache_beam as beam
 from apache_beam.runners import runner
@@ -101,9 +100,6 @@ class InteractiveEnvironment(object):
     # the gRPC server serves.
     self._test_stream_service_controllers = {}
     self._cached_source_signature = {}
-    # TODO(BEAM-8335): expose configuration of this when an API is agreed upon.
-    # The duration to capture source-to-cache.
-    self._streaming_cache_capture_duration = timedelta(seconds=60)
     self._tracked_user_pipelines = set()
     # Tracks the computation completeness of PCollections. PCollections tracked
     # here don't need to be re-computed when data introspection is needed.
@@ -144,6 +140,17 @@ class InteractiveEnvironment(object):
           'ipython kernel is not connected any notebook frontend.')
 
   @property
+  def options(self):
+    """A reference to the global interactive options.
+
+    Provided to avoid import loop or excessive dynamic import. All internal
+    Interactive Beam modules should access interactive_beam.options through
+    this property.
+    """
+    from apache_beam.runners.interactive.interactive_beam import options
+    return options
+
+  @property
   def is_py_version_ready(self):
     """If Python version is above the minimum requirement."""
     return self._is_py_version_ready
@@ -171,6 +178,8 @@ class InteractiveEnvironment(object):
     # Utilizes cache manager to clean up cache from everywhere.
     if self.cache_manager():
       self.cache_manager().cleanup()
+    self.evict_computed_pcollections()
+    self.evict_cached_source_signature()
 
   def watch(self, watchable):
     """Watches a watchable.
@@ -294,6 +303,12 @@ class InteractiveEnvironment(object):
 
   def get_cached_source_signature(self, pipeline):
     return self._cached_source_signature.get(pipeline, set())
+
+  def evict_cached_source_signature(self, pipeline=None):
+    if pipeline:
+      self._cached_source_signature.pop(pipeline, None)
+    else:
+      self._cached_source_signature.clear()
 
   def track_user_pipelines(self):
     """Record references to all user-defined pipeline instances watched in
