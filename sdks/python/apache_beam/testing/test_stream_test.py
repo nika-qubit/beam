@@ -51,11 +51,16 @@ from apache_beam.utils.windowed_value import WindowedValue
 
 class TestStreamTest(unittest.TestCase):
   def test_basic_test_stream(self):
-    test_stream = (
-        TestStream().advance_watermark_to(0).add_elements([
-            'a', WindowedValue('b', 3, []), TimestampedValue('c', 6)
-        ]).advance_processing_time(10).advance_watermark_to(8).add_elements(
-            ['d']).advance_watermark_to_infinity())
+    test_stream = (TestStream()
+                   .advance_watermark_to(0)
+                   .add_elements([
+                       'a',
+                       WindowedValue('b', 3, []),
+                       TimestampedValue('c', 6)])
+                   .advance_processing_time(10)
+                   .advance_watermark_to(8)
+                   .add_elements(['d'])
+                   .advance_watermark_to_infinity())  # yapf: disable
     self.assertEqual(
         test_stream._events,
         [
@@ -91,15 +96,17 @@ class TestStreamTest(unittest.TestCase):
               [TimestampedValue('a', timestamp.MAX_TIMESTAMP)]))
 
   def test_basic_execution(self):
-    test_stream = (
-        TestStream().advance_watermark_to(10).add_elements([
-            'a', 'b', 'c'
-        ]).advance_watermark_to(20).add_elements(['d']).add_elements([
-            'e'
-        ]).advance_processing_time(10).advance_watermark_to(300).add_elements([
-            TimestampedValue('late', 12)
-        ]).add_elements([TimestampedValue('last', 310)
-                         ]).advance_watermark_to_infinity())
+    test_stream = (TestStream()
+                   .advance_watermark_to(10)
+                   .add_elements(['a', 'b', 'c'])
+                   .advance_watermark_to(20)
+                   .add_elements(['d'])
+                   .add_elements(['e'])
+                   .advance_processing_time(10)
+                   .advance_watermark_to(300)
+                   .add_elements([TimestampedValue('late', 12)])
+                   .add_elements([TimestampedValue('last', 310)])
+                   .advance_watermark_to_infinity())  # yapf: disable
 
     class RecordFn(beam.DoFn):
       def process(
@@ -138,11 +145,11 @@ class TestStreamTest(unittest.TestCase):
         TimestampedValue('2', 12),
         TimestampedValue('3', 13),
     ]
-    test_stream = (
-        TestStream().advance_watermark_to(5, tag='letters').add_elements(
-            letters_elements,
-            tag='letters').advance_watermark_to(10, tag='numbers').add_elements(
-                numbers_elements, tag='numbers'))
+    test_stream = (TestStream()
+        .advance_watermark_to(5, tag='letters')
+        .add_elements(letters_elements, tag='letters')
+        .advance_watermark_to(10, tag='numbers')
+        .add_elements(numbers_elements, tag='numbers'))  # yapf: disable
 
     class RecordFn(beam.DoFn):
       def process(
@@ -194,18 +201,15 @@ class TestStreamTest(unittest.TestCase):
         TimestampedValue('2', 22),
         TimestampedValue('3', 23),
     ]
-    test_stream = (
-        TestStream().advance_watermark_to(
-            0, tag='letters').advance_watermark_to(
-                0, tag='numbers').advance_watermark_to(
-                    20, tag='numbers').advance_watermark_to(
-                        5, tag='letters').add_elements(
-                            letters_elements,
-                            tag='letters').advance_watermark_to(
-                                10, tag='letters').add_elements(
-                                    numbers_elements,
-                                    tag='numbers').advance_watermark_to(
-                                        30, tag='numbers'))
+    test_stream = (TestStream()
+        .advance_watermark_to(0, tag='letters')
+        .advance_watermark_to(0, tag='numbers')
+        .advance_watermark_to(20, tag='numbers')
+        .advance_watermark_to(5, tag='letters')
+        .add_elements(letters_elements, tag='letters')
+        .advance_watermark_to(10, tag='letters')
+        .add_elements(numbers_elements, tag='numbers')
+        .advance_watermark_to(30, tag='numbers'))  # yapf: disable
 
     options = StandardOptions(streaming=True)
     p = TestPipeline(options=options)
@@ -311,10 +315,12 @@ class TestStreamTest(unittest.TestCase):
     p.run()
 
   def test_gbk_execution_after_watermark_trigger(self):
-    test_stream = (
-        TestStream().advance_watermark_to(10).add_elements(
-            [TimestampedValue('a', 11)]).advance_watermark_to(20).add_elements(
-                [TimestampedValue('b', 21)]).advance_watermark_to_infinity())
+    test_stream = (TestStream()
+        .advance_watermark_to(10)
+        .add_elements([TimestampedValue('a', 11)])
+        .advance_watermark_to(20)
+        .add_elements([TimestampedValue('b', 21)])
+        .advance_watermark_to_infinity())  # yapf: disable
 
     options = PipelineOptions()
     options.view_as(StandardOptions).streaming = True
@@ -351,9 +357,11 @@ class TestStreamTest(unittest.TestCase):
     # Advance TestClock to (X + delta) and see the pipeline does finish
     # Possibly to the framework trigger_transcripts.yaml
 
-    test_stream = (
-        TestStream().advance_watermark_to(10).add_elements(
-            ['a']).advance_processing_time(5.1).advance_watermark_to_infinity())
+    test_stream = (TestStream()
+        .advance_watermark_to(10)
+        .add_elements(['a'])
+        .advance_processing_time(5.1)
+        .advance_watermark_to_infinity())  # yapf: disable
 
     options = PipelineOptions()
     options.view_as(StandardOptions).streaming = True
@@ -387,11 +395,11 @@ class TestStreamTest(unittest.TestCase):
     options.view_as(StandardOptions).streaming = True
     p = TestPipeline(options=options)
 
-    main_stream = (
-        p
-        |
-        'main TestStream' >> TestStream().advance_watermark_to(10).add_elements(
-            ['e']).advance_watermark_to_infinity())
+    main_stream = (p
+                   | 'main TestStream' >> TestStream()
+                   .advance_watermark_to(10)
+                   .add_elements(['e'])
+                   .advance_watermark_to_infinity())  # yapf: disable
     side = (
         p
         | beam.Create([2, 1, 4])
@@ -604,7 +612,7 @@ class ReverseTestStreamTest(unittest.TestCase):
                    .advance_processing_time(1)
                    .add_elements([TimestampedValue('1', 15),
                                   TimestampedValue('2', 15),
-                                  TimestampedValue('3', 15)]))
+                                  TimestampedValue('3', 15)]))  # yapf: disable
 
     options = StandardOptions(streaming=True)
     p = TestPipeline(options=options)
@@ -665,7 +673,7 @@ class ReverseTestStreamTest(unittest.TestCase):
                    .advance_processing_time(1)
                    .advance_watermark_to(15)
                    .advance_processing_time(1)
-                   )
+                   )  # yapf: disable
 
     options = StandardOptions(streaming=True)
     p = TestPipeline(options=options)
@@ -720,7 +728,7 @@ class ReverseTestStreamTest(unittest.TestCase):
                    .advance_processing_time(1)
                    .add_elements([TimestampedValue('1', 15),
                                   TimestampedValue('2', 15),
-                                  TimestampedValue('3', 15)]))
+                                  TimestampedValue('3', 15)]))  # yapf: disable
 
     options = StandardOptions(streaming=True)
     p = TestPipeline(options=options)
@@ -806,7 +814,7 @@ class ReverseTestStreamTest(unittest.TestCase):
                    .add_elements([TimestampedValue('5', 20),
                                   TimestampedValue('6', 20)],
                                  tag='b')
-                   .advance_processing_time(50))
+                   .advance_processing_time(50))  # yapf: disable
     p = beam.Pipeline()
     p | test_stream
 
@@ -816,8 +824,6 @@ class ReverseTestStreamTest(unittest.TestCase):
         TestStream.from_runner_api(test_stream_proto,
                                    context).to_runner_api(context)
     self.assertEqual(test_stream_proto, test_stream_proto_roundtrip)
-
-
 
 
 if __name__ == '__main__':
