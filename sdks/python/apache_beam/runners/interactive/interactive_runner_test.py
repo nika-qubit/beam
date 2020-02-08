@@ -29,17 +29,19 @@ from __future__ import print_function
 import unittest
 
 import pandas as pd
+
 import apache_beam as beam
 from apache_beam.runners.direct import direct_runner
 from apache_beam.runners.interactive import interactive_beam as ib
 from apache_beam.runners.interactive import interactive_environment as ie
 from apache_beam.runners.interactive import interactive_runner
 from apache_beam.runners.interactive.testing.mock_ipython import mock_get_ipython
-from apache_beam.utils.timestamp import Timestamp
 from apache_beam.transforms.window import GlobalWindow
-from apache_beam.utils.windowed_value import WindowedValue
+from apache_beam.utils.timestamp import MAX_TIMESTAMP
+from apache_beam.utils.timestamp import Timestamp
 from apache_beam.utils.windowed_value import PaneInfo
 from apache_beam.utils.windowed_value import PaneInfoTiming
+from apache_beam.utils.windowed_value import WindowedValue
 
 # TODO(BEAM-8288): clean up the work-around of nose tests using Python2 without
 # unittest.mock module.
@@ -123,9 +125,12 @@ class InteractiveRunnerTest(unittest.TestCase):
     end_of_window = (GlobalWindow().max_timestamp().micros // 1000) * 1000
     df_counts = ib.collect(counts, reify=True)
     df_expected = pd.DataFrame({
-        'element': [str(e) for e in actual.items()],
-        'event_time': [str(end_of_window) for _ in actual],
-        'window': [str([GlobalWindow()]) for _ in actual]
+        'counts[0]': [e[0] for e in actual.items()],
+        'counts[1]': [e[1] for e in actual.items()],
+        'event_time': [end_of_window for _ in actual],
+        'windows': [[GlobalWindow()] for _ in actual],
+        'pane_info': [PaneInfo(True, True, PaneInfoTiming.ON_TIME, 0, 0)
+                      for _ in actual]
     })
 
     pd.testing.assert_frame_equal(df_expected, df_counts)
