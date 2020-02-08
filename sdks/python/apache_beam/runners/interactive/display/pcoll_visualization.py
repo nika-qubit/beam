@@ -27,19 +27,16 @@ from __future__ import absolute_import
 import base64
 import logging
 import sys
-from collections import OrderedDict
 from datetime import timedelta
-
-from pandas.io.json import json_normalize
 
 from apache_beam import pvalue
 from apache_beam.portability.api.beam_runner_api_pb2 import TestStreamPayload
 from apache_beam.runners.interactive import interactive_environment as ie
 from apache_beam.runners.interactive import pipeline_instrument as instr
+from apache_beam.runners.interactive.utils import pcoll_to_df
 from apache_beam.utils.windowed_value import WindowedValue
 
 try:
-  import jsons  # pylint: disable=import-error
   from IPython import get_ipython  # pylint: disable=import-error
   from IPython.core.display import HTML  # pylint: disable=import-error
   from IPython.core.display import Javascript  # pylint: disable=import-error
@@ -214,6 +211,9 @@ class PCollectionVisualization(object):
     # Whether facets widgets should be displayed.
     self._display_facets = display_facets
 
+    pcoll_id = self._pin.pcolls_to_pcoll_id[str(pcoll)]
+    self._pcoll_var = self._pin.cacheable_var_by_pcoll_id(pcoll_id)
+
   def display_plain_text(self):
     """Displays a head sample of the normalized PCollection data.
 
@@ -226,7 +226,8 @@ class PCollectionVisualization(object):
     # the function.
     if _pcoll_visualization_ready:
       elements = _to_element_list(self._cache_key)
-      data = to_dataframe(self._pcoll, elements)
+      data = pcoll_to_df(elements, self._pcoll.element_type,
+                         prefix=self._pcoll_var, reify=True)
       # Displays a data-table with at most 25 entries from the head.
       data_sample = data.head(25)
       display(data_sample)
@@ -247,7 +248,8 @@ class PCollectionVisualization(object):
     variable).
     """
     elements = _to_element_list(self._cache_key)
-    data = to_dataframe(self._pcoll, elements)
+    data = pcoll_to_df(elements, self._pcoll.element_type,
+                       prefix=self._pcoll_var, reify=True)
     if updating_pv:
       # Only updates when data is not empty. Otherwise, consider it a bad
       # iteration and noop since there is nothing to be updated.
@@ -266,7 +268,8 @@ class PCollectionVisualization(object):
 
   def _display_dive(self, data, update=None):
     sprite_size = 32 if len(data.index) > 50000 else 64
-    jsonstr = data.to_json(orient='records')
+
+    jsonstr = data.to_json(orient='records', default_handler=str)
     if update:
       script = _DIVE_SCRIPT_TEMPLATE.format(display_id=update, jsonstr=jsonstr)
       display_javascript(Javascript(script))
@@ -278,6 +281,9 @@ class PCollectionVisualization(object):
       display(HTML(html))
 
   def _display_overview(self, data, update=None):
+    if not data.empty:
+      data = data.drop(['event_time', 'windows', 'pane_info'], axis=1)
+
     gfsg = GenericFeatureStatisticsGenerator()
     proto = gfsg.ProtoFromDataFrames([{'name': 'data', 'table': data}])
     protostr = base64.b64encode(proto.SerializeToString()).decode('utf-8')
@@ -291,17 +297,14 @@ class PCollectionVisualization(object):
       display(HTML(html))
 
   def _display_dataframe(self, data, update=None):
+    table_id = 'table_{}'.format(update if update else self._df_display_id)
+    html = _DATAFRAME_PAGINATION_TEMPLATE.format(
+        dataframe_html=data.to_html(notebook=True,
+                                    table_id=table_id),
+        table_id=table_id)
     if update:
-      table_id = 'table_{}'.format(update)
-      html = _DATAFRAME_PAGINATION_TEMPLATE.format(
-          dataframe_html=data.to_html(notebook=True, table_id=table_id),
-          table_id=table_id)
       update_display(HTML(html), display_id=update)
     else:
-      table_id = 'table_{}'.format(self._df_display_id)
-      html = _DATAFRAME_PAGINATION_TEMPLATE.format(
-          dataframe_html=data.to_html(notebook=True, table_id=table_id),
-          table_id=table_id)
       display(HTML(html), display_id=self._df_display_id)
 
 def _to_element_list(cache_key):
@@ -330,8 +333,12 @@ def _to_element_list(cache_key):
         for tv in el.element_event.elements:
           coder = cache.load_pcoder('full', cache_key)
           val = coder.decode(tv.encoded_element)
+          if not isinstance(val, WindowedValue):
+            val = WindowedValue(**val)
           output.append(val)
       else:
+        if not isinstance(el, WindowedValue):
+          el = WindowedValue(**el)
         output.append(el)
 
     except StopIteration:
@@ -341,45 +348,3 @@ def _to_element_list(cache_key):
       _LOGGER.debug(sys.exc_info())
 
   return output
-
-def to_dataframe(pcoll, elements, reify=True):
-  jsons.suppress_warnings()
-  normalized_list = []
-  # Normalization needs to be done for each element because they might be of
-  # different types. The check is only done on the root level, pandas json
-  # normalization I/O would take care of the nested levels.
-
-  columns = ['element']
-  if reify:
-    columns = ['element', 'event_time', 'window']
-
-  normalized_list = []
-  for el in elements:
-    if not isinstance(el, WindowedValue):
-      el = WindowedValue(**el)
-
-    # Use an OrderedDict to keep the column order.
-    value = str(el.value)
-    event_time = str(el.timestamp.micros)
-    win = str(el.windows)
-
-    el = OrderedDict([
-        ('element', value),
-        ('event_time', event_time),
-        ('window', win)])
-
-    normalized_list.append(jsons.loads(jsons.dumps(el),
-                                       object_pairs_hook=OrderedDict))
-
-  # Creates a dataframe that str() 1-d iterable elements after
-  # normalization so that facets_overview can treat such data as categorical.
-  df = json_normalize(normalized_list).applymap(
-      lambda x: str(x) if type(x) in (list, tuple) else x)
-
-  # Reindex to show the dataframe with the correct column order.
-  if columns:
-    return df.reindex(columns=columns)
-  return df
-
-def _is_one_dimension_type(val):
-  return type(val) in _one_dimension_types

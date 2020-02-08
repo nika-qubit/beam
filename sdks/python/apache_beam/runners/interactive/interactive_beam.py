@@ -44,8 +44,8 @@ from apache_beam.runners.interactive import pipeline_fragment as pf
 from apache_beam.runners.interactive import pipeline_instrument as pi
 from apache_beam.runners.interactive.display import pipeline_graph
 from apache_beam.runners.interactive.display.pcoll_visualization import visualize
-from apache_beam.runners.interactive.display.pcoll_visualization import to_dataframe
 from apache_beam.runners.interactive.options import interactive_options
+from apache_beam.runners.interactive.utils import pcoll_to_df
 
 
 class Options(interactive_options.InteractiveOptions):
@@ -328,7 +328,7 @@ def head(pcoll, n=5, reify=True):
   result.wait_until_finish()
 
   results = []
-  for e in result.get(pcoll, reify=True):
+  for e in result.get(pcoll, reify=reify):
     results.append(e)
     if len(results) >= n:
       break
@@ -339,7 +339,10 @@ def head(pcoll, n=5, reify=True):
   if result.state is beam.runners.runner.PipelineState.DONE:
     ie.current_env().mark_pcollection_computed([pcoll])
 
-  return to_dataframe(pcoll, results, reify=reify)
+  pin = pi.PipelineInstrument(user_pipeline)
+  pcoll_id = pin.pcolls_to_pcoll_id[str(pcoll)]
+  pcoll_var = pin.cacheable_var_by_pcoll_id(pcoll_id)
+  return pcoll_to_df(results, pcoll.element_type, reify=reify, prefix=pcoll_var)
 
 
 def show_graph(pipeline):
