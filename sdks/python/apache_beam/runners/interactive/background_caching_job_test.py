@@ -101,10 +101,6 @@ class BackgroundCachingJobTest(unittest.TestCase):
       'apache_beam.runners.interactive.background_caching_job'
       '.has_source_to_cache',
       lambda x: True)
-  @patch(
-      'apache_beam.runners.interactive.pipeline_instrument'
-      '.PipelineInstrument.streaming_cache_keys',
-      lambda x: (_TEST_CACHE_KEY, ))
   # Disable the clean up so that we can keep the test streaming cache.
   @patch(
       'apache_beam.runners.interactive.interactive_environment'
@@ -135,10 +131,6 @@ class BackgroundCachingJobTest(unittest.TestCase):
       'apache_beam.runners.interactive.background_caching_job'
       '.has_source_to_cache',
       lambda x: True)
-  @patch(
-      'apache_beam.runners.interactive.pipeline_instrument'
-      '.PipelineInstrument.streaming_cache_keys',
-      lambda x: (_TEST_CACHE_KEY, ))
   # Disable the clean up so that we can keep the test streaming cache.
   @patch(
       'apache_beam.runners.interactive.interactive_environment'
@@ -163,10 +155,6 @@ class BackgroundCachingJobTest(unittest.TestCase):
       'apache_beam.runners.interactive.background_caching_job'
       '.has_source_to_cache',
       lambda x: True)
-  @patch(
-      'apache_beam.runners.interactive.pipeline_instrument'
-      '.PipelineInstrument.streaming_cache_keys',
-      lambda x: (_TEST_CACHE_KEY, ))
   # Disable the clean up so that we can keep the test streaming cache.
   @patch(
       'apache_beam.runners.interactive.interactive_environment'
