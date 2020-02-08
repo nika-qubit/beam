@@ -93,11 +93,10 @@ class BackgroundCachingJobTest(unittest.TestCase):
 
   # TODO(BEAM-8335): remove the patches when there are appropriate test sources
   # that meet the boundedness checks.
-  @patch('apache_beam.runners.interactive.background_caching_job'
-         '.has_source_to_cache', lambda x: True)
-  @patch('apache_beam.runners.interactive.pipeline_instrument'
-         '.PipelineInstrument.streaming_cache_keys',
-         lambda x: (_TEST_CACHE_KEY,))
+  @patch(
+      'apache_beam.runners.interactive.background_caching_job'
+      '.has_source_to_cache',
+      lambda x: True)
   # Disable the clean up so that we can keep the test streaming cache.
   @patch('apache_beam.runners.interactive.interactive_environment'
          '.InteractiveEnvironment.cleanup', lambda x: None)
@@ -118,14 +117,12 @@ class BackgroundCachingJobTest(unittest.TestCase):
   def test_background_caching_job_not_start_for_batch_pipeline(self):
     p = _build_a_test_stream_pipeline()
     p.run()
-    self.assertIsNone(
-        ie.current_env().get_background_caching_job(p))
+    self.assertIsNone(ie.current_env().get_background_caching_job(p))
 
-  @patch('apache_beam.runners.interactive.background_caching_job'
-         '.has_source_to_cache', lambda x: True)
-  @patch('apache_beam.runners.interactive.pipeline_instrument'
-         '.PipelineInstrument.streaming_cache_keys',
-         lambda x: (_TEST_CACHE_KEY,))
+  @patch(
+      'apache_beam.runners.interactive.background_caching_job'
+      '.has_source_to_cache',
+      lambda x: True)
   # Disable the clean up so that we can keep the test streaming cache.
   @patch('apache_beam.runners.interactive.interactive_environment'
          '.InteractiveEnvironment.cleanup', lambda x: None)
@@ -143,11 +140,10 @@ class BackgroundCachingJobTest(unittest.TestCase):
     # A new main job is started so result of the main job is set.
     self.assertIs(main_job_result, ie.current_env().pipeline_result(p))
 
-  @patch('apache_beam.runners.interactive.background_caching_job'
-         '.has_source_to_cache', lambda x: True)
-  @patch('apache_beam.runners.interactive.pipeline_instrument'
-         '.PipelineInstrument.streaming_cache_keys',
-         lambda x: (_TEST_CACHE_KEY,))
+  @patch(
+      'apache_beam.runners.interactive.background_caching_job'
+      '.has_source_to_cache',
+      lambda x: True)
   # Disable the clean up so that we can keep the test streaming cache.
   @patch('apache_beam.runners.interactive.interactive_environment'
          '.InteractiveEnvironment.cleanup', lambda x: None)

@@ -270,7 +270,7 @@ class StreamingCacheTest(unittest.TestCase):
     options = StandardOptions(streaming=True)
     with TestPipeline(options=options) as p:
       # pylint: disable=expression-not-assigned
-      p | test_stream | cache.sink('records')
+      p | test_stream | cache.sink(['records'])
 
     reader, _ = cache.read('records')
     actual_events = list(reader)
@@ -348,8 +348,8 @@ class StreamingCacheTest(unittest.TestCase):
     with TestPipeline(options=options) as p:
       # pylint: disable=expression-not-assigned
       events = p | test_stream
-      events[LETTERS_TAG] | 'Letters sink' >> cache.sink(LETTERS_TAG)
-      events[NUMBERS_TAG] | 'Numbers sink' >> cache.sink(NUMBERS_TAG)
+      events[LETTERS_TAG] | 'Letters sink' >> cache.sink([LETTERS_TAG])
+      events[NUMBERS_TAG] | 'Numbers sink' >> cache.sink([NUMBERS_TAG])
 
     reader = cache.read_multiple([[LETTERS_TAG], [NUMBERS_TAG]])
     actual_events = list(reader)

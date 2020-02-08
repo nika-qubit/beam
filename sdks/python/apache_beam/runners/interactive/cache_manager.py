@@ -93,7 +93,7 @@ class CacheManager(object):
     """Returns a PTransform that reads the PCollection cache."""
     raise NotImplementedError
 
-  def sink(self, *labels):
+  def sink(self, labels, is_capture=False):
     """Returns a PTransform that writes the PCollection cache."""
     raise NotImplementedError
 
@@ -198,7 +198,7 @@ class FileBasedCacheManager(CacheManager):
   def source(self, *labels):
     return beam.io.Read(self._source(*labels))
 
-  def sink(self, *labels):
+  def sink(self, labels, is_capture=False):
     return beam.io.Write(self._sink(*labels))
 
   def _source(self, *labels):
@@ -259,11 +259,13 @@ class ReadCache(beam.PTransform):
 
 class WriteCache(beam.PTransform):
   """A PTransform that writes the PCollections to the cache."""
-  def __init__(self, cache_manager, label, sample=False, sample_size=0):
+  def __init__(self, cache_manager, label, sample=False, sample_size=0,
+               is_capture=False):
     self._cache_manager = cache_manager
     self._label = label
     self._sample = sample
     self._sample_size = sample_size
+    self._is_capture = is_capture
 
   def expand(self, pcoll):
     prefix = 'sample' if self._sample else 'full'
@@ -279,7 +281,8 @@ class WriteCache(beam.PTransform):
           combiners.Sample.FixedSizeGlobally(self._sample_size)
           | beam.FlatMap(lambda sample: sample))
     # pylint: disable=expression-not-assigned
-    return pcoll | 'Write' >> self._cache_manager.sink(prefix, self._label)
+    return pcoll | 'Write' >> self._cache_manager.sink(
+        (prefix, self._label), is_capture=self._is_capture)
 
 
 class SafeFastPrimitivesCoder(coders.Coder):

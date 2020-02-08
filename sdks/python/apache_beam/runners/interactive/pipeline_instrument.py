@@ -372,13 +372,6 @@ class PipelineInstrument(object):
     pipeline to instances in the user pipeline."""
     return self._runner_pcoll_to_user_pcoll
 
-  def streaming_cache_keys(self):
-    """Returns all keys (either to user-defined pcolls or cached source) that
-    have valid cache in the streaming cache.
-    """
-    # TODO(BEAM-8335): add the implementation through apache/beam/pull/10368.
-    return ()
-
   def instrument(self):
     """Instruments original pipeline with cache.
 
@@ -427,9 +420,11 @@ class PipelineInstrument(object):
     # Instrument the background caching pipeline if we can.
     if self.has_unbounded_sources:
       for source in self._unbounded_sources:
-        self._write_cache(self._background_caching_pipeline,
-                          source.outputs[None],
-                          output_as_extended_target=False)
+        self._write_cache(
+            self._background_caching_pipeline,
+            source.outputs[None],
+            output_as_extended_target=False,
+            is_capture=True)
 
       class TestStreamVisitor(PipelineVisitor):
         def __init__(self):
@@ -503,8 +498,13 @@ class PipelineInstrument(object):
     v = PreprocessVisitor(self)
     self._pipeline.visit(v)
 
-  def _write_cache(self, pipeline, pcoll, output_as_extended_target=True,
-                   ignore_unbounded_reads=False):
+  def _write_cache(
+      self,
+      pipeline,
+      pcoll,
+      output_as_extended_target=True,
+      ignore_unbounded_reads=False,
+      is_capture=False):
     """Caches a cacheable PCollection.
 
     For the given PCollection, by appending sub transform part that materialize
@@ -552,9 +552,11 @@ class PipelineInstrument(object):
                     t=beam.DoFn.TimestampParam):
           yield {'value': e, 'timestamp': t, 'windows': [w], 'pane_info': p}
 
-      extended_target = (pcoll
-                         | label + 'reify' >> beam.ParDo(Reify())
-                         | label >> cache.WriteCache(self._cache_manager, key))
+      extended_target = (
+          pcoll
+          | label + 'reify' >> beam.ParDo(Reify())
+          | label >> cache.WriteCache(self._cache_manager, key,
+                                      is_capture=is_capture))
       if output_as_extended_target:
         self._extended_targets.add(extended_target)
 

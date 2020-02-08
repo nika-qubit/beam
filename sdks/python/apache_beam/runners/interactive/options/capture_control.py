@@ -52,8 +52,9 @@ class CaptureControl(object):
 
   def is_capture_size_reached(self):
     """Determines if the capture size has been reached."""
-    # TODO(b/148873135): Add the implementation to compare cache file size with
-    # self._capture_size.
+    cache_manager = ie.current_env().cache_manager()
+    if hasattr(cache_manager, 'capture_size'):
+      return cache_manager.capture_size >= self._capture_size
     return False
 
 
