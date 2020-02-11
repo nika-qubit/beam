@@ -268,18 +268,19 @@ def is_source_to_cache_changed(
   # The computation of extract_unbounded_source_signature is expensive, track on
   # change by default.
   if is_changed and update_cached_source_signature:
-    if not recorded_signature:
-      _LOGGER.info(
-          'Interactive Beam has detected you have unbounded sources '
-          'in your pipeline. In order to have a deterministic replay '
-          'of your pipeline: {}'.format(
-              ie.current_env().options.capture_control))
-    else:
-      _LOGGER.info(
-          'Interactive Beam has detected a new streaming source was '
-          'added to the pipeline. In order for the cached streaming '
-          'data to start at the same time, all caches have been '
-          'cleared. {}'.format(ie.current_env().options.capture_control))
+    if ie.current_env().options.enable_capture:
+      if not recorded_signature:
+          _LOGGER.info(
+              'Interactive Beam has detected you have unbounded sources '
+              'in your pipeline. In order to have a deterministic replay '
+              'of your pipeline: {}'.format(
+                  ie.current_env().options.capture_control))
+      else:
+          _LOGGER.info(
+              'Interactive Beam has detected a new streaming source was '
+              'added to the pipeline. In order for the cached streaming '
+              'data to start at the same time, all caches have been '
+              'cleared. {}'.format(ie.current_env().options.capture_control))
 
     ie.current_env().cleanup()
     ie.current_env().set_cached_source_signature(

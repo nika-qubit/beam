@@ -38,6 +38,7 @@ from apache_beam.runners.interactive import interactive_environment as ie
 from apache_beam.runners.interactive import pipeline_instrument as inst
 from apache_beam.runners.interactive import background_caching_job
 from apache_beam.runners.interactive.display import pipeline_graph
+from apache_beam.runners.interactive.options import capture_control
 from apache_beam.testing.test_stream_service import TestStreamServiceController
 from apache_beam.transforms.window import WindowedValue
 
@@ -140,6 +141,8 @@ class InteractiveRunner(runners.PipelineRunner):
     return self._underlying_runner.apply(transform, pvalueish, options)
 
   def run_pipeline(self, pipeline, options):
+    if not ie.current_env().options.enable_capture:
+      capture_control.evict_captured_data()
     if self._force_compute:
       ie.current_env().evict_computed_pcollections()
 

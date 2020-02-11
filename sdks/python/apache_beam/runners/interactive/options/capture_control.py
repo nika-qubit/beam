@@ -35,6 +35,7 @@ class CaptureControl(object):
   """Options and their utilities that controls how Interactive Beam captures
   deterministic replayable data from sources."""
   def __init__(self):
+    self._enable_capture = True
     self._capturable_sources = {
         ReadFromPubSub,
     }  # yapf: disable
@@ -62,10 +63,11 @@ def evict_captured_data():
   """Evicts all deterministic replayable data that have been captured by
   Interactive Beam. In future PCollection evaluation/visualization and pipeline
   runs, Interactive Beam will capture fresh data."""
-  _LOGGER.info(
-      'You have requested Interactive Beam to evict all captured '
-      'data that could be deterministically replayed among multiple '
-      'pipeline runs.')
+  if ie.current_env().options.enable_capture:
+    _LOGGER.info(
+        'You have requested Interactive Beam to evict all captured '
+        'data that could be deterministically replayed among multiple '
+        'pipeline runs.')
   ie.current_env().track_user_pipelines()
   for user_pipeline in ie.current_env().tracked_user_pipelines:
     bcj.attempt_to_cancel_background_caching_job(user_pipeline)
