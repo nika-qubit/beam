@@ -54,6 +54,22 @@ class StreamingCacheSink(beam.PTransform):
     self._filename = filename
     self._sample_resolution_sec = sample_resolution_sec
     self._coder = coder
+    # The expand implementation decides the format of path and implementation of
+    # related properties.
+    self._path = os.path.join(self._cache_dir, self._filename)
+
+  @property
+  def path(self):
+    """Returns the path the sink leads to."""
+    return self._path
+
+  @property
+  def size_in_bytes(self):
+    """Returns the space usage in bytes of the sink."""
+    try:
+      return os.stat(self._path).st_size
+    except:
+      return 0
 
   def expand(self, pcoll):
     class StreamingWriteToText(beam.DoFn):
@@ -62,14 +78,11 @@ class StreamingCacheSink(beam.PTransform):
       Note that the other file writing methods cannot be used in streaming
       contexts.
       """
-      def __init__(self, path, filename, coder=SafeFastPrimitivesCoder()):
-        self._path = path
-        self._filename = filename
-        self._full_path = os.path.join(self._path, self._filename)
+      def __init__(self, full_path, coder=SafeFastPrimitivesCoder()):
+        self._full_path = full_path
         self._coder = coder
 
-        if not os.path.exists(self._path):
-          os.makedirs(self._path)
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
 
       def start_bundle(self):
         self._fh = open(self._full_path, 'ab')
@@ -88,11 +101,9 @@ class StreamingCacheSink(beam.PTransform):
             sample_resolution_sec=self._sample_resolution_sec,
             output_format=ReverseTestStream.SERIALIZED,
             coder=self._coder)
-        | beam.ParDo(
-            StreamingWriteToText(
-                path=self._cache_dir,
-                filename=self._filename,
-                coder=self._coder)))
+        | beam.ParDo(StreamingWriteToText(
+            full_path=self._path,
+            coder=self._coder)))
 
 
 class StreamingCacheSource:
@@ -214,6 +225,18 @@ class StreamingCache(CacheManager):
     self._saved_pcoders = {}
     self._default_pcoder = SafeFastPrimitivesCoder()
 
+    # The sinks to capture data from capturable sources.
+    # Dict([str, StreamingCacheSink])
+    self._capture_sinks = {}
+
+  @property
+  def capture_size(self):
+    return sum([sink.size_in_bytes for _, sink in self._capture_sinks.items()])
+
+  @property
+  def capture_paths(self):
+    return list(self._capture_sinks.keys())
+
   def exists(self, *labels):
     path = os.path.join(self._cache_dir, *labels)
     return os.path.exists(path)
@@ -270,7 +293,7 @@ class StreamingCache(CacheManager):
     """
     return beam.Impulse()
 
-  def sink(self, *labels):
+  def sink(self, labels, is_capture=False):
     """Returns a StreamingCacheSink to write elements to file.
 
     Note that this is assumed to only work in the DirectRunner as the underlying
@@ -279,7 +302,10 @@ class StreamingCache(CacheManager):
     """
     filename = labels[-1]
     cache_dir = os.path.join(self._cache_dir, *labels[:-1])
-    return StreamingCacheSink(cache_dir, filename, self._sample_resolution_sec)
+    sink = StreamingCacheSink(cache_dir, filename, self._sample_resolution_sec)
+    if is_capture:
+      self._capture_sinks[sink.path] = sink
+    return sink
 
   def save_pcoder(self, pcoder, *labels):
     self._saved_pcoders[os.path.join(*labels)] = pcoder
@@ -293,6 +319,7 @@ class StreamingCache(CacheManager):
     if os.path.exists(self._cache_dir):
       shutil.rmtree(self._cache_dir)
     self._saved_pcoders = {}
+    self._capture_sinks = {}
 
   class Reader(object):
     """Abstraction that reads from PCollection readers.

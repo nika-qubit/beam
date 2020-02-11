@@ -85,7 +85,7 @@ class InMemoryCache(CacheManager):
     vals = self._cached[self._key(*labels)]
     return beam.Create(vals)
 
-  def sink(self, *labels):
+  def sink(self, labels, is_capture=False):
     return beam.Map(lambda _: _)
 
   def _key(self, *labels):

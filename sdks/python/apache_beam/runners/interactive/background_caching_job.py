@@ -41,6 +41,7 @@ from __future__ import absolute_import
 
 import logging
 import threading
+import time
 
 import apache_beam as beam
 from apache_beam.runners.interactive import interactive_environment as ie
@@ -52,40 +53,54 @@ _LOGGER.setLevel(logging.INFO)
 
 
 class BackgroundCachingJob(object):
-  """A simple abstraction that controls necessary components of a timed
-  background caching job.
+  """A simple abstraction that controls necessary components of a timed and
+  space limited background caching job.
 
   A background caching job successfully terminates in 2 conditions:
 
     #. The job is finite and run into DONE state;
-    #. The job is infinite but hit an interactive environment configured time
-       limit and gets cancelled into CANCELLED state.
+    #. The job is infinite but hit an Interactive Beam options configured limit
+       and gets cancelled into CANCELLED state.
 
   In both situations, the background caching job should be treated as done
   successfully.
   """
-  def __init__(self, pipeline_result):
+  def __init__(self, pipeline_result, start_limit_checkers=True):
     self._pipeline_result = pipeline_result
     self._timer = threading.Timer(
         ie.current_env().options.capture_duration.total_seconds(), self._cancel)
     self._condition_checker = threading.Thread(
         target=self._background_caching_job_condition_checker)
-    self._timer.start()
-    self._condition_checker.start()
+    if start_limit_checkers:
+      self._timer.start()
+      self._condition_checker.start()
     self._timer_triggered = False
     self._condition_checker_triggered = False
 
   def _background_caching_job_condition_checker(self):
+    while True:
+      if self._should_end_condition_checker():
+        break
+      time.sleep(5)
+
+  def _should_end_condition_checker(self):
     if ie.current_env().options.capture_control.is_capture_size_reached():
       self._condition_checker_triggered = True
       self.cancel()
+      return True
+    if not self._timer.is_alive():
+      # If the timer is not alive any more, the background caching job must
+      # have been cancelled by business logic or the timer.
+      return True
+    return False
 
   def is_done(self):
     return (
         self._pipeline_result.state is PipelineState.DONE or (
-            self._timer_triggered or
-            self._condition_checker_triggered and self._pipeline_result.state in
-            (PipelineState.CANCELLED, PipelineState.CANCELLING)))
+            (self._timer_triggered or
+             self._condition_checker_triggered) and
+            self._pipeline_result.state in (
+                PipelineState.CANCELLED, PipelineState.CANCELLING)))
 
   def is_running(self):
     return self._pipeline_result.state is PipelineState.RUNNING
@@ -102,9 +117,6 @@ class BackgroundCachingJob(object):
     self._timer_triggered = False
     if self._timer.is_alive():
       self._timer.cancel()
-    if (not self._condition_checker_triggered and
-        self._condition_checker.is_alive()):
-      self._condition_checker.cancel()
 
   def _cancel(self):
     self._timer_triggered = True

@@ -391,13 +391,6 @@ class PipelineInstrument(object):
     pipeline to instances in the user pipeline."""
     return self._runner_pcoll_to_user_pcoll
 
-  def streaming_cache_keys(self):
-    """Returns all keys (either to user-defined pcolls or cached source) that
-    have valid cache in the streaming cache.
-    """
-    # TODO(BEAM-8335): add the implementation through apache/beam/pull/10368.
-    return ()
-
   def instrument(self):
     """Instruments original pipeline with cache.
 
@@ -451,7 +444,8 @@ class PipelineInstrument(object):
         self._write_cache(
             self._background_caching_pipeline,
             source.outputs[None],
-            output_as_extended_target=False)
+            output_as_extended_target=False,
+            is_capture=True)
 
       class TestStreamVisitor(PipelineVisitor):
         def __init__(self):
@@ -530,7 +524,8 @@ class PipelineInstrument(object):
       pipeline,
       pcoll,
       output_as_extended_target=True,
-      ignore_unbounded_reads=False):
+      ignore_unbounded_reads=False,
+      is_capture=False):
     """Caches a cacheable PCollection.
 
     For the given PCollection, by appending sub transform part that materialize
@@ -585,7 +580,8 @@ class PipelineInstrument(object):
       extended_target = (
           pcoll
           | label + 'reify' >> beam.ParDo(Reify())
-          | label >> cache.WriteCache(self._cache_manager, key))
+          | label >> cache.WriteCache(self._cache_manager, key,
+                                      is_capture=is_capture))
       if output_as_extended_target:
         self._extended_targets.add(extended_target)
 
