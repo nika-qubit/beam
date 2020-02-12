@@ -26,16 +26,17 @@ from __future__ import absolute_import
 
 import base64
 import logging
+import sys
 from datetime import timedelta
 
-from pandas.io.json import json_normalize
-
 from apache_beam import pvalue
+from apache_beam.portability.api.beam_runner_api_pb2 import TestStreamPayload
 from apache_beam.runners.interactive import interactive_environment as ie
 from apache_beam.runners.interactive import pipeline_instrument as instr
+from apache_beam.runners.interactive.utils import pcoll_to_df
+from apache_beam.utils.windowed_value import WindowedValue
 
 try:
-  import jsons  # pylint: disable=import-error
   from IPython import get_ipython  # pylint: disable=import-error
   from IPython.core.display import HTML  # pylint: disable=import-error
   from IPython.core.display import Javascript  # pylint: disable=import-error
@@ -51,6 +52,8 @@ try:
     _pcoll_visualization_ready = False
 except ImportError:
   _pcoll_visualization_ready = False
+
+_LOGGER = logging.getLogger(__name__)
 
 # 1-d types that need additional normalization to be compatible with DataFrame.
 _one_dimension_types = (int, float, str, bool, list, tuple)
@@ -82,12 +85,26 @@ _DATAFRAME_PAGINATION_TEMPLATE = """
             <script>
               $(document).ready(
                 function() {{
-                  $("#{table_id}").DataTable();
+                  $("#{table_id}").DataTable({{
+                    columnDefs: [
+                      {{
+                        targets: "_all",
+                        className: "dt-left"
+                      }},
+                      {{
+                        "targets": 0,
+                        "width": "10px",
+                        "title": ""
+                      }}
+                    ]
+                  }});
                 }});
             </script>"""
 
 
-def visualize(pcoll, dynamic_plotting_interval=None):
+def visualize(pcoll,
+              dynamic_plotting_interval=None,
+              display_facets=False):
   """Visualizes the data of a given PCollection. Optionally enables dynamic
   plotting with interval in seconds if the PCollection is being produced by a
   running pipeline or the pipeline is streaming indefinitely. The function
@@ -109,14 +126,18 @@ def visualize(pcoll, dynamic_plotting_interval=None):
 
   If dynamic_plotting is not enabled (by default), None is returned.
 
+  If display_facets is True, the facets widgets will be rendered. Otherwise, the
+  facets widgets will not be rendered.
+
   The function is experimental. For internal use only; no
   backwards-compatibility guarantees.
   """
   if not _pcoll_visualization_ready:
     return None
-  pv = PCollectionVisualization(pcoll)
+  pv = PCollectionVisualization(pcoll,
+                                display_facets)
   if ie.current_env().is_in_notebook:
-    pv.display_facets()
+    pv.display()
   else:
     pv.display_plain_text()
     # We don't want to do dynamic plotting if there is no notebook frontend.
@@ -127,14 +148,18 @@ def visualize(pcoll, dynamic_plotting_interval=None):
     logging.getLogger('timeloop').disabled = True
     tl = Timeloop()
 
-    def dynamic_plotting(pcoll, pv, tl):
+    def dynamic_plotting(pcoll, pv, tl, display_facets):
       @tl.job(interval=timedelta(seconds=dynamic_plotting_interval))
       def continuous_update_display():  # pylint: disable=unused-variable
         # Always creates a new PCollVisualization instance when the
         # PCollection materialization is being updated and dynamic
         # plotting is in-process.
-        updated_pv = PCollectionVisualization(pcoll)
-        updated_pv.display_facets(updating_pv=pv)
+        # PCollectionVisualization created at this level doesn't need dynamic
+        # plotting interval information when instantiated because it's already
+        # in dynamic plotting logic.
+        updated_pv = PCollectionVisualization(pcoll,
+                                              display_facets=display_facets)
+        updated_pv.display(updating_pv=pv)
         if ie.current_env().is_terminated(pcoll.pipeline):
           try:
             tl.stop()
@@ -145,7 +170,7 @@ def visualize(pcoll, dynamic_plotting_interval=None):
       tl.start()
       return tl
 
-    return dynamic_plotting(pcoll, pv, tl)
+    return dynamic_plotting(pcoll, pv, tl, display_facets)
   return None
 
 
@@ -156,7 +181,9 @@ class PCollectionVisualization(object):
   access current interactive environment for materialized PCollection data at
   the moment of self instantiation through cache.
   """
-  def __init__(self, pcoll):
+  def __init__(self,
+               pcoll,
+               display_facets=False):
     assert _pcoll_visualization_ready, (
         'Dependencies for PCollection visualization are not available. Please '
         'use `pip install apache-beam[interactive]` to install necessary '
@@ -181,21 +208,31 @@ class PCollectionVisualization(object):
     self._overview_display_id = 'facets_overview_{}_{}'.format(
         self._cache_key, id(self))
     self._df_display_id = 'df_{}_{}'.format(self._cache_key, id(self))
+    # Whether facets widgets should be displayed.
+    self._display_facets = display_facets
+
+    pcoll_id = self._pin.pcolls_to_pcoll_id[str(pcoll)]
+    self._pcoll_var = self._pin.cacheable_var_by_pcoll_id(pcoll_id)
 
   def display_plain_text(self):
-    """Displays a random sample of the normalized PCollection data.
+    """Displays a head sample of the normalized PCollection data.
 
     This function is used when the ipython kernel is not connected to a
     notebook frontend such as when running ipython in terminal or in unit tests.
+    It's a visualization in terminal-like UI, not a function to retrieve data
+    for programmatically usages.
     """
     # Double check if the dependency is ready in case someone mistakenly uses
     # the function.
     if _pcoll_visualization_ready:
-      data = self._to_dataframe()
-      data_sample = data.sample(n=25 if len(data) > 25 else len(data))
+      elements = _to_element_list(self._cache_key)
+      data = pcoll_to_df(elements, self._pcoll.element_type,
+                         prefix=self._pcoll_var, reify=True)
+      # Displays a data-table with at most 25 entries from the head.
+      data_sample = data.head(25)
       display(data_sample)
 
-  def display_facets(self, updating_pv=None):
+  def display(self, updating_pv=None):
     """Displays the visualization through IPython.
 
     Args:
@@ -203,27 +240,36 @@ class PCollectionVisualization(object):
         display_id of each visualization part will inherit from the initial
         display of updating_pv and only update that visualization web element
         instead of creating new ones.
+      display_facets:
 
     The visualization has 3 parts: facets-dive, facets-overview and paginated
     data table. Each part is assigned an auto-generated unique display id
     (the uniqueness is guaranteed throughout the lifespan of the PCollection
     variable).
     """
-    # Ensures that dive, overview and table render the same data because the
-    # materialized PCollection data might being updated continuously.
-    data = self._to_dataframe()
+    elements = _to_element_list(self._cache_key)
+    data = pcoll_to_df(elements, self._pcoll.element_type,
+                       prefix=self._pcoll_var, reify=True)
     if updating_pv:
-      self._display_dive(data, updating_pv._dive_display_id)
-      self._display_overview(data, updating_pv._overview_display_id)
-      self._display_dataframe(data, updating_pv._df_display_id)
+      # Only updates when data is not empty. Otherwise, consider it a bad
+      # iteration and noop since there is nothing to be updated.
+      if data.empty:
+        _LOGGER.debug('Skip a visualization update due to empty data.')
+      else:
+        self._display_dataframe(data, updating_pv._df_display_id)
+        if self._display_facets:
+          self._display_dive(data, updating_pv._dive_display_id)
+          self._display_overview(data, updating_pv._overview_display_id)
     else:
-      self._display_dive(data)
-      self._display_overview(data)
       self._display_dataframe(data)
+      if self._display_facets:
+        self._display_dive(data)
+        self._display_overview(data)
 
   def _display_dive(self, data, update=None):
     sprite_size = 32 if len(data.index) > 50000 else 64
-    jsonstr = data.to_json(orient='records')
+
+    jsonstr = data.to_json(orient='records', default_handler=str)
     if update:
       script = _DIVE_SCRIPT_TEMPLATE.format(display_id=update, jsonstr=jsonstr)
       display_javascript(Javascript(script))
@@ -235,6 +281,9 @@ class PCollectionVisualization(object):
       display(HTML(html))
 
   def _display_overview(self, data, update=None):
+    if not data.empty:
+      data = data.drop(['event_time', 'windows', 'pane_info'], axis=1)
+
     gfsg = GenericFeatureStatisticsGenerator()
     proto = gfsg.ProtoFromDataFrames([{'name': 'data', 'table': data}])
     protostr = base64.b64encode(proto.SerializeToString()).decode('utf-8')
@@ -248,43 +297,54 @@ class PCollectionVisualization(object):
       display(HTML(html))
 
   def _display_dataframe(self, data, update=None):
+    table_id = 'table_{}'.format(update if update else self._df_display_id)
+    html = _DATAFRAME_PAGINATION_TEMPLATE.format(
+        dataframe_html=data.to_html(notebook=True,
+                                    table_id=table_id),
+        table_id=table_id)
     if update:
-      table_id = 'table_{}'.format(update)
-      html = _DATAFRAME_PAGINATION_TEMPLATE.format(
-          dataframe_html=data.to_html(notebook=True, table_id=table_id),
-          table_id=table_id)
       update_display(HTML(html), display_id=update)
     else:
-      table_id = 'table_{}'.format(self._df_display_id)
-      html = _DATAFRAME_PAGINATION_TEMPLATE.format(
-          dataframe_html=data.to_html(notebook=True, table_id=table_id),
-          table_id=table_id)
       display(HTML(html), display_id=self._df_display_id)
 
-  def _to_element_list(self):
-    pcoll_list = []
-    if ie.current_env().cache_manager().exists('full', self._cache_key):
-      pcoll_list, _ = ie.current_env().cache_manager().read('full',
-                                                            self._cache_key)
-    return pcoll_list
+def _to_element_list(cache_key):
+  pcoll_list = iter([])
+  try:
+    if ie.current_env().cache_manager().exists('full', cache_key):
+      pcoll_list, _ = ie.current_env().cache_manager().read('full', cache_key)
+  # pylint: disable=bare-except
+  except:
+    _LOGGER.debug(sys.exc_info())
+    # If the read errors out for some reason, be resilient to it and return
+    # empty data.
+    pcoll_list = iter([])
 
-  def _to_dataframe(self):
-    normalized_list = []
-    # Column name for _one_dimension_types if presents.
-    normalized_column = str(self._pcoll)
-    # Normalization needs to be done for each element because they might be of
-    # different types. The check is only done on the root level, pandas json
-    # normalization I/O would take care of the nested levels.
-    for el in self._to_element_list():
-      if self._is_one_dimension_type(el):
-        # Makes such data structured.
-        normalized_list.append({normalized_column: el})
+  output = []
+  while True:
+    # pylint: disable=bare-except
+    try:
+      el = next(pcoll_list)
+      if isinstance(el, TestStreamPayload.Event):
+        if (el.HasField('watermark_event') or
+            el.HasField('processing_time_event')):
+          continue
+
+        cache = ie.current_env().cache_manager()
+        for tv in el.element_event.elements:
+          coder = cache.load_pcoder('full', cache_key)
+          val = coder.decode(tv.encoded_element)
+          if not isinstance(val, WindowedValue):
+            val = WindowedValue(**val)
+          output.append(val)
       else:
-        normalized_list.append(jsons.load(jsons.dump(el)))
-    # Creates a dataframe that str() 1-d iterable elements after
-    # normalization so that facets_overview can treat such data as categorical.
-    return json_normalize(normalized_list).applymap(
-        lambda x: str(x) if type(x) in (list, tuple) else x)
+        if not isinstance(el, WindowedValue):
+          el = WindowedValue(**el)
+        output.append(el)
 
-  def _is_one_dimension_type(self, val):
-    return type(val) in _one_dimension_types
+    except StopIteration:
+      break
+
+    except:
+      _LOGGER.debug(sys.exc_info())
+
+  return output

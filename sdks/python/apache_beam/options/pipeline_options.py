@@ -1106,8 +1106,14 @@ class TestOptions(PipelineOptions):
         default=None,
         type=int,
         help='The time to wait (in milliseconds) for test pipeline to finish. '
-        'If it is set to None, it will wait indefinitely until the job '
-        'is finished.')
+             'If it is set to None, it will wait indefinitely until the job '
+             'is finished.')
+    parser.add_argument(
+        '--test_stream_service_endpoint',
+        default=None,
+        type=str,
+        help='The IPv4 or IPv6 endpoint of the TestStreamService to receive '
+             'events from.')
 
   def validate(self, validator):
     errors = []

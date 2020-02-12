@@ -26,11 +26,17 @@ import unittest
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions
 from apache_beam.options.pipeline_options import StandardOptions
+from apache_beam.options.pipeline_options import TestOptions
+from apache_beam.portability.api.beam_interactive_api_pb2 import TestStreamFileHeader
+from apache_beam.portability.api.beam_interactive_api_pb2 import TestStreamFileRecord
+from apache_beam.portability.api.beam_runner_api_pb2 import TestStreamPayload
 from apache_beam.testing.test_pipeline import TestPipeline
 from apache_beam.testing.test_stream import ElementEvent
 from apache_beam.testing.test_stream import ProcessingTimeEvent
+from apache_beam.testing.test_stream import ReverseTestStream
 from apache_beam.testing.test_stream import TestStream
 from apache_beam.testing.test_stream import WatermarkEvent
+from apache_beam.testing.test_stream_service import TestStreamServiceController
 from apache_beam.testing.util import assert_that
 from apache_beam.testing.util import equal_to
 from apache_beam.testing.util import equal_to_per_window
@@ -45,11 +51,16 @@ from apache_beam.utils.windowed_value import WindowedValue
 
 class TestStreamTest(unittest.TestCase):
   def test_basic_test_stream(self):
-    test_stream = (
-        TestStream().advance_watermark_to(0).add_elements([
-            'a', WindowedValue('b', 3, []), TimestampedValue('c', 6)
-        ]).advance_processing_time(10).advance_watermark_to(8).add_elements(
-            ['d']).advance_watermark_to_infinity())
+    test_stream = (TestStream()
+                   .advance_watermark_to(0)
+                   .add_elements([
+                       'a',
+                       WindowedValue('b', 3, []),
+                       TimestampedValue('c', 6)])
+                   .advance_processing_time(10)
+                   .advance_watermark_to(8)
+                   .add_elements(['d'])
+                   .advance_watermark_to_infinity())  # yapf: disable
     self.assertEqual(
         test_stream._events,
         [
@@ -85,15 +96,17 @@ class TestStreamTest(unittest.TestCase):
               [TimestampedValue('a', timestamp.MAX_TIMESTAMP)]))
 
   def test_basic_execution(self):
-    test_stream = (
-        TestStream().advance_watermark_to(10).add_elements([
-            'a', 'b', 'c'
-        ]).advance_watermark_to(20).add_elements(['d']).add_elements([
-            'e'
-        ]).advance_processing_time(10).advance_watermark_to(300).add_elements([
-            TimestampedValue('late', 12)
-        ]).add_elements([TimestampedValue('last', 310)
-                         ]).advance_watermark_to_infinity())
+    test_stream = (TestStream()
+                   .advance_watermark_to(10)
+                   .add_elements(['a', 'b', 'c'])
+                   .advance_watermark_to(20)
+                   .add_elements(['d'])
+                   .add_elements(['e'])
+                   .advance_processing_time(10)
+                   .advance_watermark_to(300)
+                   .add_elements([TimestampedValue('late', 12)])
+                   .add_elements([TimestampedValue('last', 310)])
+                   .advance_watermark_to_infinity())  # yapf: disable
 
     class RecordFn(beam.DoFn):
       def process(
@@ -132,11 +145,11 @@ class TestStreamTest(unittest.TestCase):
         TimestampedValue('2', 12),
         TimestampedValue('3', 13),
     ]
-    test_stream = (
-        TestStream().advance_watermark_to(5, tag='letters').add_elements(
-            letters_elements,
-            tag='letters').advance_watermark_to(10, tag='numbers').add_elements(
-                numbers_elements, tag='numbers'))
+    test_stream = (TestStream()
+        .advance_watermark_to(5, tag='letters')
+        .add_elements(letters_elements, tag='letters')
+        .advance_watermark_to(10, tag='numbers')
+        .add_elements(numbers_elements, tag='numbers'))  # yapf: disable
 
     class RecordFn(beam.DoFn):
       def process(
@@ -188,18 +201,15 @@ class TestStreamTest(unittest.TestCase):
         TimestampedValue('2', 22),
         TimestampedValue('3', 23),
     ]
-    test_stream = (
-        TestStream().advance_watermark_to(
-            0, tag='letters').advance_watermark_to(
-                0, tag='numbers').advance_watermark_to(
-                    20, tag='numbers').advance_watermark_to(
-                        5, tag='letters').add_elements(
-                            letters_elements,
-                            tag='letters').advance_watermark_to(
-                                10, tag='letters').add_elements(
-                                    numbers_elements,
-                                    tag='numbers').advance_watermark_to(
-                                        30, tag='numbers'))
+    test_stream = (TestStream()
+        .advance_watermark_to(0, tag='letters')
+        .advance_watermark_to(0, tag='numbers')
+        .advance_watermark_to(20, tag='numbers')
+        .advance_watermark_to(5, tag='letters')
+        .add_elements(letters_elements, tag='letters')
+        .advance_watermark_to(10, tag='letters')
+        .add_elements(numbers_elements, tag='numbers')
+        .advance_watermark_to(30, tag='numbers'))  # yapf: disable
 
     options = StandardOptions(streaming=True)
     p = TestPipeline(options=options)
@@ -305,10 +315,12 @@ class TestStreamTest(unittest.TestCase):
     p.run()
 
   def test_gbk_execution_after_watermark_trigger(self):
-    test_stream = (
-        TestStream().advance_watermark_to(10).add_elements(
-            [TimestampedValue('a', 11)]).advance_watermark_to(20).add_elements(
-                [TimestampedValue('b', 21)]).advance_watermark_to_infinity())
+    test_stream = (TestStream()
+        .advance_watermark_to(10)
+        .add_elements([TimestampedValue('a', 11)])
+        .advance_watermark_to(20)
+        .add_elements([TimestampedValue('b', 21)])
+        .advance_watermark_to_infinity())  # yapf: disable
 
     options = PipelineOptions()
     options.view_as(StandardOptions).streaming = True
@@ -345,9 +357,11 @@ class TestStreamTest(unittest.TestCase):
     # Advance TestClock to (X + delta) and see the pipeline does finish
     # Possibly to the framework trigger_transcripts.yaml
 
-    test_stream = (
-        TestStream().advance_watermark_to(10).add_elements(
-            ['a']).advance_processing_time(5.1).advance_watermark_to_infinity())
+    test_stream = (TestStream()
+        .advance_watermark_to(10)
+        .add_elements(['a'])
+        .advance_processing_time(5.1)
+        .advance_watermark_to_infinity())  # yapf: disable
 
     options = PipelineOptions()
     options.view_as(StandardOptions).streaming = True
@@ -381,11 +395,11 @@ class TestStreamTest(unittest.TestCase):
     options.view_as(StandardOptions).streaming = True
     p = TestPipeline(options=options)
 
-    main_stream = (
-        p
-        |
-        'main TestStream' >> TestStream().advance_watermark_to(10).add_elements(
-            ['e']).advance_watermark_to_infinity())
+    main_stream = (p
+                   | 'main TestStream' >> TestStream()
+                   .advance_watermark_to(10)
+                   .add_elements(['e'])
+                   .advance_watermark_to_infinity())  # yapf: disable
     side = (
         p
         | beam.Create([2, 1, 4])
@@ -527,6 +541,289 @@ class TestStreamTest(unittest.TestCase):
         label='assert per window')
 
     p.run()
+
+  def test_basic_execution_with_service(self):
+    """Tests that the TestStream can correctly read from an RPC service.
+    """
+    coder = beam.coders.FastPrimitivesCoder()
+    test_stream = (TestStream(coder=coder)
+                   .advance_watermark_to(10000)
+                   .add_elements(['a', 'b', 'c'])
+                   .advance_watermark_to(20000)
+                   .add_elements(['d'])
+                   .add_elements(['e'])
+                   .advance_processing_time(10)
+                   .advance_watermark_to(300000)
+                   .add_elements([TimestampedValue('late', 12000)])
+                   .add_elements([TimestampedValue('last', 310000)])
+                   .advance_watermark_to_infinity())
+
+    test_stream_proto_events = [e.to_runner_api(coder)
+                                for e in test_stream._events]
+
+    class InMemoryEventReader:
+      def read_multiple(self, unused_keys):
+        for e in test_stream_proto_events:
+          yield e
+
+    service = TestStreamServiceController(reader=InMemoryEventReader())
+    service.start()
+
+    class RecordFn(beam.DoFn):
+      def process(self, element=beam.DoFn.ElementParam,
+                  timestamp=beam.DoFn.TimestampParam):
+        yield (element, timestamp)
+
+    options = PipelineOptions()
+    options.view_as(StandardOptions).streaming = True
+    options.view_as(TestOptions).test_stream_service_endpoint = service.endpoint
+
+    p = TestPipeline(options=options)
+    my_record_fn = RecordFn()
+    records = p | test_stream | beam.ParDo(my_record_fn)
+
+    assert_that(records, equal_to([
+        ('a', timestamp.Timestamp(10)),
+        ('b', timestamp.Timestamp(10)),
+        ('c', timestamp.Timestamp(10)),
+        ('d', timestamp.Timestamp(20)),
+        ('e', timestamp.Timestamp(20)),
+        ('late', timestamp.Timestamp(12)),
+        ('last', timestamp.Timestamp(310)),]))
+
+    p.run()
+
+
+class ReverseTestStreamTest(unittest.TestCase):
+  def test_basic_execution(self):
+    test_stream = (TestStream()
+                   .advance_watermark_to(0)
+                   .advance_processing_time(5)
+                   .add_elements(['a', 'b', 'c'])
+                   .advance_watermark_to(2)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(4)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(6)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(8)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(10)
+                   .advance_processing_time(1)
+                   .add_elements([TimestampedValue('1', 15),
+                                  TimestampedValue('2', 15),
+                                  TimestampedValue('3', 15)]))  # yapf: disable
+
+    options = StandardOptions(streaming=True)
+    p = TestPipeline(options=options)
+
+    records = (p
+               | test_stream
+               | ReverseTestStream(sample_resolution_sec=1, output_tag=None)
+               )
+
+    assert_that(records, equal_to_per_window({
+        beam.window.GlobalWindow(): [
+            [ProcessingTimeEvent(5), WatermarkEvent(0)],
+            [ElementEvent([TimestampedValue('a', 0),
+                           TimestampedValue('b', 0),
+                           TimestampedValue('c', 0)])],
+            [ProcessingTimeEvent(1), WatermarkEvent(2000000)],
+            [ProcessingTimeEvent(1), WatermarkEvent(4000000)],
+            [ProcessingTimeEvent(1), WatermarkEvent(6000000)],
+            [ProcessingTimeEvent(1), WatermarkEvent(8000000)],
+            [ProcessingTimeEvent(1), WatermarkEvent(10000000)],
+            [ElementEvent([TimestampedValue('1', 15),
+                           TimestampedValue('2', 15),
+                           TimestampedValue('3', 15)])],
+        ],
+    }))
+
+    p.run()
+
+  def test_windowing(self):
+    test_stream = (TestStream()
+                   .advance_watermark_to(0)
+                   .add_elements(['a', 'b', 'c'])
+                   .advance_processing_time(1)
+                   .advance_processing_time(1)
+                   .advance_processing_time(1)
+                   .advance_processing_time(1)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(5)
+                   .add_elements(['1', '2', '3'])
+                   .advance_processing_time(1)
+                   .advance_watermark_to(6)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(7)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(8)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(9)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(10)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(11)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(12)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(13)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(14)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(15)
+                   .advance_processing_time(1)
+                   )  # yapf: disable
+
+    options = StandardOptions(streaming=True)
+    p = TestPipeline(options=options)
+
+    records = (p
+               | test_stream
+               | 'letter windows' >> beam.WindowInto(
+                   FixedWindows(5),
+                   accumulation_mode=trigger.AccumulationMode.DISCARDING)
+               | 'letter with key' >> beam.Map(lambda x: ('k', x))
+               | 'letter gbk' >> beam.GroupByKey()
+               | ReverseTestStream(sample_resolution_sec=1, output_tag=None)
+               )
+
+    assert_that(records, equal_to_per_window({
+        beam.window.GlobalWindow(): [
+            [ProcessingTimeEvent(5), WatermarkEvent(4999998)],
+            [ElementEvent([TimestampedValue(('k', ['a', 'b', 'c']),
+                                            4.999999)])],
+            [ProcessingTimeEvent(1), WatermarkEvent(5000000)],
+            [ProcessingTimeEvent(1), WatermarkEvent(6000000)],
+            [ProcessingTimeEvent(1), WatermarkEvent(7000000)],
+            [ProcessingTimeEvent(1), WatermarkEvent(8000000)],
+            [ProcessingTimeEvent(1), WatermarkEvent(9000000)],
+            [ElementEvent([TimestampedValue(('k', ['1', '2', '3']),
+                                            9.999999)])],
+            [ProcessingTimeEvent(1), WatermarkEvent(10000000)],
+            [ProcessingTimeEvent(1), WatermarkEvent(11000000)],
+            [ProcessingTimeEvent(1), WatermarkEvent(12000000)],
+            [ProcessingTimeEvent(1), WatermarkEvent(13000000)],
+            [ProcessingTimeEvent(1), WatermarkEvent(14000000)],
+            [ProcessingTimeEvent(1), WatermarkEvent(15000000)],
+        ],
+    }))
+
+    p.run()
+
+  def test_basic_execution_in_records_format(self):
+    test_stream = (TestStream()
+                   .advance_watermark_to(0)
+                   .advance_processing_time(5)
+                   .add_elements(['a', 'b', 'c'])
+                   .advance_watermark_to(2)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(4)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(6)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(8)
+                   .advance_processing_time(1)
+                   .advance_watermark_to(10)
+                   .advance_processing_time(1)
+                   .add_elements([TimestampedValue('1', 15),
+                                  TimestampedValue('2', 15),
+                                  TimestampedValue('3', 15)]))  # yapf: disable
+
+    options = StandardOptions(streaming=True)
+    p = TestPipeline(options=options)
+
+    coder = beam.coders.FastPrimitivesCoder()
+    records = (p
+               | test_stream
+               | ReverseTestStream(sample_resolution_sec=1,
+                                   coder=coder,
+                                   output_format=ReverseTestStream.FILE_RECORD,
+                                   output_tag=None)
+               | 'stringify' >> beam.Map(str)
+               )
+
+    assert_that(records, equal_to_per_window({
+        beam.window.GlobalWindow(): [
+            str(TestStreamFileHeader()),
+            str(TestStreamFileRecord(
+                watermark_event=TestStreamPayload.Event.AdvanceWatermark(
+                    new_watermark=0),
+                processing_time=Timestamp(seconds=5).to_proto())),
+            str(TestStreamFileRecord(
+                element_event=TestStreamPayload.Event.AddElements(
+                    elements=[
+                        TestStreamPayload.TimestampedElement(
+                            encoded_element=coder.encode('a'), timestamp=0),
+                        TestStreamPayload.TimestampedElement(
+                            encoded_element=coder.encode('b'), timestamp=0),
+                        TestStreamPayload.TimestampedElement(
+                            encoded_element=coder.encode('c'), timestamp=0),
+                    ]),
+                processing_time=Timestamp(seconds=5).to_proto())),
+            str(TestStreamFileRecord(
+                watermark_event=TestStreamPayload.Event.AdvanceWatermark(
+                    new_watermark=2000000),
+                processing_time=Timestamp(seconds=6).to_proto())),
+            str(TestStreamFileRecord(
+                watermark_event=TestStreamPayload.Event.AdvanceWatermark(
+                    new_watermark=4000000),
+                processing_time=Timestamp(seconds=7).to_proto())),
+            str(TestStreamFileRecord(
+                watermark_event=TestStreamPayload.Event.AdvanceWatermark(
+                    new_watermark=6000000),
+                processing_time=Timestamp(seconds=8).to_proto())),
+            str(TestStreamFileRecord(
+                watermark_event=TestStreamPayload.Event.AdvanceWatermark(
+                    new_watermark=8000000),
+                processing_time=Timestamp(seconds=9).to_proto())),
+            str(TestStreamFileRecord(
+                watermark_event=TestStreamPayload.Event.AdvanceWatermark(
+                    new_watermark=10000000),
+                processing_time=Timestamp(seconds=10).to_proto())),
+            str(TestStreamFileRecord(
+                element_event=TestStreamPayload.Event.AddElements(
+                    elements=[
+                        TestStreamPayload.TimestampedElement(
+                            encoded_element=coder.encode('1'),
+                            timestamp=15000000),
+                        TestStreamPayload.TimestampedElement(
+                            encoded_element=coder.encode('2'),
+                            timestamp=15000000),
+                        TestStreamPayload.TimestampedElement(
+                            encoded_element=coder.encode('3'),
+                            timestamp=15000000),
+                    ]),
+                processing_time=Timestamp(seconds=10).to_proto())),
+        ],
+    }))
+
+    p.run()
+
+  def test_test_stream_encode_decode(self):
+    test_stream = (TestStream(output_tags=[None, 'a', 'b'])
+                   .advance_watermark_to(new_watermark=10, tag=None)
+                   .advance_watermark_to(new_watermark=10, tag='a')
+                   .advance_watermark_to(new_watermark=10, tag='b')
+                   .add_elements([TimestampedValue('1', 20),
+                                  TimestampedValue('2', 20)],
+                                 tag=None)
+                   .add_elements([TimestampedValue('3', 20),
+                                  TimestampedValue('4', 20)],
+                                 tag='a')
+                   .add_elements([TimestampedValue('5', 20),
+                                  TimestampedValue('6', 20)],
+                                 tag='b')
+                   .advance_processing_time(50))  # yapf: disable
+    p = beam.Pipeline()
+    p | test_stream
+
+    _, context = p.to_runner_api(return_context=True)
+    test_stream_proto = test_stream.to_runner_api(context)
+    test_stream_proto_roundtrip = \
+        TestStream.from_runner_api(test_stream_proto,
+                                   context).to_runner_api(context)
+    self.assertEqual(test_stream_proto, test_stream_proto_roundtrip)
 
 
 if __name__ == '__main__':

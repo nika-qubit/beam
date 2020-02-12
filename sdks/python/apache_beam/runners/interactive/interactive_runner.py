@@ -30,12 +30,17 @@ import logging
 
 import apache_beam as beam
 from apache_beam import runners
+from apache_beam.options.pipeline_options import TestOptions
+from apache_beam.portability.api.beam_runner_api_pb2 import TestStreamPayload
 from apache_beam.runners.direct import direct_runner
 from apache_beam.runners.interactive import cache_manager as cache
 from apache_beam.runners.interactive import interactive_environment as ie
 from apache_beam.runners.interactive import pipeline_instrument as inst
 from apache_beam.runners.interactive import background_caching_job
 from apache_beam.runners.interactive.display import pipeline_graph
+from apache_beam.runners.interactive.options import capture_control
+from apache_beam.testing.test_stream_service import TestStreamServiceController
+from apache_beam.transforms.window import WindowedValue
 
 # size of PCollection samples cached.
 SAMPLE_SIZE = 8
@@ -48,14 +53,15 @@ class InteractiveRunner(runners.PipelineRunner):
 
   Allows interactively building and running Beam Python pipelines.
   """
-  def __init__(
-      self,
-      underlying_runner=None,
-      cache_dir=None,
-      cache_format='text',
-      render_option=None,
-      skip_display=False,
-      force_compute=True):
+
+  def __init__(self,
+               underlying_runner=None,
+               cache_dir=None,
+               cache_format='text',
+               render_option=None,
+               skip_display=True,
+               force_compute=True,
+               blocking=True):
     """Constructor of InteractiveRunner.
 
     Args:
@@ -74,6 +80,7 @@ class InteractiveRunner(runners.PipelineRunner):
           pipeline and compute data for PCollections forcefully. If False, use
           available data and run minimum pipeline fragment to only compute data
           not available.
+      blocking: (bool) whether the pipeline run should be blocking or not.
     """
     self._underlying_runner = (
         underlying_runner or direct_runner.DirectRunner())
@@ -85,6 +92,7 @@ class InteractiveRunner(runners.PipelineRunner):
     self._in_session = False
     self._skip_display = skip_display
     self._force_compute = force_compute
+    self._blocking = blocking
 
   def is_fnapi_compatible(self):
     # TODO(BEAM-8436): return self._underlying_runner.is_fnapi_compatible()
@@ -133,21 +141,41 @@ class InteractiveRunner(runners.PipelineRunner):
     return self._underlying_runner.apply(transform, pvalueish, options)
 
   def run_pipeline(self, pipeline, options):
+    if not ie.current_env().options.enable_capture:
+      capture_control.evict_captured_data()
     if self._force_compute:
       ie.current_env().evict_computed_pcollections()
 
-    pipeline_instrument = inst.pin(pipeline, options)
+    # Make sure that sources without a user reference are still cached.
+    inst.watch_sources(pipeline)
+
+    user_pipeline = inst.user_pipeline(pipeline)
+    pipeline_instrument = inst.build_pipeline_instrument(pipeline, options)
 
     # The user_pipeline analyzed might be None if the pipeline given has nothing
     # to be cached and tracing back to the user defined pipeline is impossible.
     # When it's None, there is no need to cache including the background
     # caching job and no result to track since no background caching job is
     # started at all.
-    user_pipeline = pipeline_instrument.user_pipeline
     if user_pipeline:
       # Should use the underlying runner and run asynchronously.
       background_caching_job.attempt_to_run_background_caching_job(
           self._underlying_runner, user_pipeline, options)
+      if (background_caching_job.has_source_to_cache(user_pipeline) and
+          not background_caching_job.is_a_test_stream_service_running(
+              user_pipeline)):
+        streaming_cache_manager = ie.current_env().cache_manager()
+        if streaming_cache_manager:
+          test_stream_service = TestStreamServiceController(
+              streaming_cache_manager)
+          test_stream_service.start()
+          ie.current_env().set_test_stream_service_controller(
+              user_pipeline, test_stream_service)
+
+    if ie.current_env().get_test_stream_service_controller(user_pipeline):
+      endpoint = ie.current_env().get_test_stream_service_controller(
+          user_pipeline).endpoint
+      options.view_as(TestOptions).test_stream_service_endpoint = endpoint
 
     pipeline_to_execute = beam.pipeline.Pipeline.from_runner_api(
         pipeline_instrument.instrumented_pipeline_proto(),
@@ -166,9 +194,10 @@ class InteractiveRunner(runners.PipelineRunner):
     # outer scopes are also recommended since the user_pipeline might not be
     # available from within this scope.
     if user_pipeline:
-      ie.current_env().set_pipeline_result(
-          user_pipeline, main_job_result, is_main_job=True)
-    main_job_result.wait_until_finish()
+      ie.current_env().set_pipeline_result(user_pipeline, main_job_result)
+
+    if self._blocking:
+      main_job_result.wait_until_finish()
 
     if main_job_result.state is beam.runners.runner.PipelineState.DONE:
       # pylint: disable=dict-values-not-iterating
@@ -194,14 +223,38 @@ class PipelineResult(beam.runners.runner.PipelineResult):
     self._underlying_result = underlying_result
     self._pipeline_instrument = pipeline_instrument
 
+  @property
+  def state(self):
+    return self._underlying_result.state
+
   def wait_until_finish(self):
     self._underlying_result.wait_until_finish()
 
-  def get(self, pcoll):
+  def get(self, pcoll, reify=False):
+    """Materializes the PCollection into a list.
+
+    If reify is True, then returns the elements as WindowedValues. Otherwise,
+    return the element as itself.
+    """
     key = self._pipeline_instrument.cache_key(pcoll)
-    if ie.current_env().cache_manager().exists('full', key):
-      pcoll_list, _ = ie.current_env().cache_manager().read('full', key)
-      return pcoll_list
+    cache_manager = ie.current_env().cache_manager()
+    if cache_manager.exists('full', key):
+      pcoll_list, _ = cache_manager.read('full', key)
+      results = []
+      for e in pcoll_list:
+        if isinstance(e, TestStreamPayload.Event):
+          if (e.HasField('watermark_event') or
+              e.HasField('processing_time_event')):
+            continue
+          else:
+            for tv in e.element_event.elements:
+              coder = cache_manager.load_pcoder('full', key)
+              decoded = coder.decode(tv.encoded_element)
+              results.append(
+                  WindowedValue(**decoded) if reify else decoded['value'])
+        else:
+          results.append(WindowedValue(**e) if reify else e['value'])
+      return results
     else:
       raise ValueError('PCollection not available, please run the pipeline.')
 

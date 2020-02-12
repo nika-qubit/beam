@@ -77,6 +77,7 @@ class _TestStream(PTransform):
     self.coder = coder
     self._raw_events = events
     self._events = self._add_watermark_advancements(output_tags, events)
+    self.output_tags = output_tags
 
   def _watermark_starts(self, output_tags):
     """Sentinel values to hold the watermark of outputs to -inf.
@@ -152,9 +153,6 @@ class _TestStream(PTransform):
     5. Advance WatermarkController watermarks to +inf
     6. Advance root watermark to +inf.
     """
-    if not events:
-      return []
-
     return self._set_up(output_tags) + events + self._tear_down(output_tags)
 
   def get_windowing(self, unused_inputs):

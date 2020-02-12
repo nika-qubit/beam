@@ -41,6 +41,7 @@ import apache_beam.io as io
 from apache_beam import coders
 from apache_beam import pvalue
 from apache_beam.internal import pickler
+from apache_beam.portability.api import beam_runner_api_pb2
 from apache_beam.runners import common
 from apache_beam.runners.common import DoFnRunner
 from apache_beam.runners.common import DoFnState
@@ -60,6 +61,8 @@ from apache_beam.runners.direct.watermark_manager import WatermarkManager
 from apache_beam.testing.test_stream import ElementEvent
 from apache_beam.testing.test_stream import ProcessingTimeEvent
 from apache_beam.testing.test_stream import WatermarkEvent
+from apache_beam.testing.test_stream import _TimingInfo
+from apache_beam.testing.test_stream import _TimingInfoReporter
 from apache_beam.transforms import core
 from apache_beam.transforms.trigger import InMemoryUnmergedState
 from apache_beam.transforms.trigger import TimeDomain
@@ -70,10 +73,12 @@ from apache_beam.transforms.trigger import create_trigger_driver
 from apache_beam.transforms.userstate import get_dofn_specs
 from apache_beam.transforms.userstate import is_stateful_dofn
 from apache_beam.transforms.window import GlobalWindows
+from apache_beam.transforms.window import TimestampedValue
 from apache_beam.transforms.window import WindowedValue
 from apache_beam.typehints.typecheck import TypeCheckError
 from apache_beam.utils import counters
 from apache_beam.utils.timestamp import MIN_TIMESTAMP
+from apache_beam.utils.timestamp import Duration
 from apache_beam.utils.timestamp import Timestamp
 
 if TYPE_CHECKING:
@@ -111,6 +116,7 @@ class TransformEvaluatorRegistry(object):
         _TestStream: _TestStreamEvaluator,
         ProcessElements: _ProcessElementsEvaluator,
         _WatermarkController: _WatermarkControllerEvaluator,
+        _TimingInfoReporter: _TimingInfoReporterEvaluator,
     }  # type: Dict[Type[core.PTransform], Type[_TransformEvaluator]]
     self._evaluators.update(self._test_evaluators_overrides)
     self._root_bundle_providers = {
@@ -212,6 +218,19 @@ class _TestStreamRootBundleProvider(RootBundleProvider):
   """
   def get_root_bundles(self):
     test_stream = self._applied_ptransform.transform
+    if self._evaluation_context._test_stream_event_stub:
+      stub = self._evaluation_context._test_stream_event_stub
+
+      if list(test_stream.output_tags) == [None]:
+        event_request = beam_runner_api_pb2.EventsRequest()
+      else:
+        event_request = beam_runner_api_pb2.EventsRequest(
+            keys=list(test_stream.output_tags))
+
+      test_stream_event_channel = stub.Events(event_request)
+      self._evaluation_context._test_stream_event_channel = \
+          test_stream_event_channel
+
     bundle = self._evaluation_context.create_bundle(
         pvalue.PBegin(self._applied_ptransform.transform.pipeline))
     bundle.add(
@@ -421,8 +440,12 @@ class _WatermarkControllerEvaluator(_TransformEvaluator):
       main_output = list(self._outputs)[0]
       bundle = self._evaluation_context.create_bundle(main_output)
       for tv in event.timestamped_values:
-        bundle.output(
-            GlobalWindows.windowed_value(tv.value, timestamp=tv.timestamp))
+        # Unreify the value into the correct window.
+        try:
+          bundle.output(WindowedValue(**tv.value))
+        except TypeError:
+          bundle.output(GlobalWindows.windowed_value(tv.value,
+                                                     timestamp=tv.timestamp))
       self.bundles.append(bundle)
 
   def finish_bundle(self):
@@ -430,6 +453,43 @@ class _WatermarkControllerEvaluator(_TransformEvaluator):
     # to control the output watermark.
     return TransformResult(
         self, self.bundles, [], None, {None: self._watermark})
+
+
+class _TimingInfoReporterEvaluator(_TransformEvaluator):
+  """TransformEvaluator for the TestStream transform.
+
+  This evaluator's responsibility is to retrieve the next event from the
+  _TestStream and either: advance the clock, advance the _TestStream watermark,
+  or pass the event to the _WatermarkController.
+
+  The _WatermarkController is in charge of emitting the elements to the
+  downstream consumers and setting its own output watermark.
+  """
+
+  def __init__(self, evaluation_context, applied_ptransform,
+               input_committed_bundle, side_inputs):
+    assert not side_inputs
+    super(_TimingInfoReporterEvaluator, self).__init__(
+        evaluation_context, applied_ptransform, input_committed_bundle,
+        side_inputs)
+
+  def start_bundle(self):
+    main_output = list(self._outputs)[0]
+    self.bundle = self._evaluation_context.create_bundle(main_output)
+
+  def process_element(self, element):
+    watermark_manager = self._evaluation_context._watermark_manager
+    watermarks = watermark_manager.get_watermarks(self._applied_ptransform)
+
+    output_watermark = watermarks.output_watermark
+    now = Timestamp(seconds=watermark_manager._clock.time())
+    timing_info = _TimingInfo(element.timestamp, now, output_watermark)
+
+    element.value = (element.value, timing_info)
+    self.bundle.output(element)
+
+  def finish_bundle(self):
+    return TransformResult(self, [self.bundle], [], None, {})
 
 
 class _TestStreamEvaluator(_TransformEvaluator):
@@ -449,12 +509,16 @@ class _TestStreamEvaluator(_TransformEvaluator):
       input_committed_bundle,
       side_inputs):
     assert not side_inputs
-    self.test_stream = applied_ptransform.transform
     super(_TestStreamEvaluator, self).__init__(
         evaluation_context,
         applied_ptransform,
         input_committed_bundle,
         side_inputs)
+    self.test_stream = applied_ptransform.transform
+    self.test_stream_event_channel = \
+        evaluation_context._test_stream_event_channel
+    self.test_stream_event_channel_is_done = \
+        self.test_stream_event_channel is None
 
   def start_bundle(self):
     self.current_index = 0
@@ -471,7 +535,40 @@ class _TestStreamEvaluator(_TransformEvaluator):
     # We can either have the _TestStream or the _WatermarkController to emit
     # the elements. We chose to emit in the _WatermarkController so that the
     # element is emitted at the correct watermark value.
-    for event in self.test_stream.events(self.current_index):
+    events = []
+    if self.watermark == MIN_TIMESTAMP:
+      for event in self.test_stream._set_up(self.test_stream.output_tags):
+        events.append(event)
+
+    if self.test_stream_event_channel:
+      try:
+        event = next(self.test_stream_event_channel)
+        if event.HasField('element_event'):
+          element_event = event.element_event
+          elements = [
+              TimestampedValue(self.test_stream.coder.decode(e.encoded_element),
+                               Timestamp(micros=e.timestamp))
+              for e in element_event.elements]
+          events.append(ElementEvent(timestamped_values=elements,
+                                     tag=element_event.tag))
+        elif event.HasField('watermark_event'):
+          watermark_event = event.watermark_event
+          events.append(WatermarkEvent(
+              Timestamp(micros=watermark_event.new_watermark),
+              tag=watermark_event.tag))
+        elif event.HasField('processing_time_event'):
+          processing_time_event = event.processing_time_event
+          events.append(ProcessingTimeEvent(
+              Duration(micros=processing_time_event.advance_duration)))
+      except StopIteration:
+        self.test_stream_event_channel_is_done = True
+        events += (
+            [e for e in self.test_stream._tear_down(
+                self.test_stream.output_tags)])
+    else:
+      events += [e for e in self.test_stream.events(self.current_index)]
+
+    for event in events:
       if isinstance(event, (ElementEvent, WatermarkEvent)):
         # The WATERMARK_CONTROL_TAG is used to hold the _TestStream's
         # watermark to -inf, then +inf-1, then +inf. This watermark progression
@@ -493,7 +590,9 @@ class _TestStreamEvaluator(_TransformEvaluator):
   def finish_bundle(self):
     unprocessed_bundles = []
     next_index = self.test_stream.next(self.current_index)
-    if not self.test_stream.end(next_index):
+
+    if (not self.test_stream.end(next_index) or
+        not self.test_stream_event_channel_is_done):
       unprocessed_bundle = self._evaluation_context.create_bundle(
           pvalue.PBegin(self._applied_ptransform.transform.pipeline))
       unprocessed_bundle.add(

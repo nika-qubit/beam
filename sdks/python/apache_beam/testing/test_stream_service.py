@@ -28,19 +28,22 @@ from apache_beam.portability.api.beam_runner_api_pb2_grpc import TestStreamServi
 
 
 class TestStreamServiceController(TestStreamServiceServicer):
-  def __init__(self, events, endpoint=None):
+  def __init__(self, reader, endpoint=None):
+    assert hasattr(reader, 'read_multiple'),\
+        '{} does not have required \'read_multiple\' method'.format(reader)
+
     self._server = grpc.server(ThreadPoolExecutor(max_workers=10))
 
     if endpoint:
       self.endpoint = endpoint
       self._server.add_insecure_port(self.endpoint)
     else:
-      port = self._server.add_insecure_port('[::]:0')
-      self.endpoint = '[::]:{}'.format(port)
+      port = self._server.add_insecure_port('localhost:0')
+      self.endpoint = 'localhost:{}'.format(port)
 
     beam_runner_api_pb2_grpc.add_TestStreamServiceServicer_to_server(
         self, self._server)
-    self._events = events
+    self._reader = reader
 
   def start(self):
     self._server.start()
@@ -52,5 +55,6 @@ class TestStreamServiceController(TestStreamServiceServicer):
   def Events(self, request, context):
     """Streams back all of the events from the streaming cache."""
 
-    for e in self._events:
+    reader = self._reader.read_multiple([['full', key] for key in request.keys])
+    for e in reader:
       yield e

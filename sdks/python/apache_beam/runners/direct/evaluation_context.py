@@ -249,7 +249,8 @@ class EvaluationContext(object):
                value_to_consumers,
                step_names,
                views,  # type: Iterable[pvalue.AsSideInput]
-               clock
+               clock,
+               test_stream_event_stub=None,
               ):
     self.pipeline_options = pipeline_options
     self._bundle_factory = bundle_factory
@@ -273,7 +274,8 @@ class EvaluationContext(object):
     ]  # type: List[Tuple[TransformExecutor, Timestamp]]
     self._counter_factory = counters.CounterFactory()
     self._metrics = DirectMetrics()
-
+    self._test_stream_event_stub = test_stream_event_stub
+    self._test_stream_event_channel = None
     self._lock = threading.Lock()
 
   def _initialize_keyed_states(self, root_transforms, value_to_consumers):
