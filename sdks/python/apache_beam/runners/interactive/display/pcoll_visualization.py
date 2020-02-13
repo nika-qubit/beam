@@ -102,7 +102,8 @@ _DATAFRAME_PAGINATION_TEMPLATE = """
             </script>"""
 
 
-def visualize(pcoll, dynamic_plotting_interval=None, display_facets=False):
+def visualize(pcoll, dynamic_plotting_interval=None, include_window_info=False,
+              display_facets=False):
   """Visualizes the data of a given PCollection. Optionally enables dynamic
   plotting with interval in seconds if the PCollection is being produced by a
   running pipeline or the pipeline is streaming indefinitely. The function
@@ -124,6 +125,9 @@ def visualize(pcoll, dynamic_plotting_interval=None, display_facets=False):
 
   If dynamic_plotting is not enabled (by default), None is returned.
 
+  If include_window_info is True, the data will include window information,
+  which consists of the event timestamps, windows, and pane info.
+
   If display_facets is True, the facets widgets will be rendered. Otherwise, the
   facets widgets will not be rendered.
 
@@ -132,7 +136,10 @@ def visualize(pcoll, dynamic_plotting_interval=None, display_facets=False):
   """
   if not _pcoll_visualization_ready:
     return None
-  pv = PCollectionVisualization(pcoll, display_facets)
+  pv = PCollectionVisualization(
+      pcoll,
+      include_window_info=include_window_info,
+      display_facets=display_facets)
   if ie.current_env().is_in_notebook:
     pv.display()
   else:
@@ -178,7 +185,7 @@ class PCollectionVisualization(object):
   access current interactive environment for materialized PCollection data at
   the moment of self instantiation through cache.
   """
-  def __init__(self, pcoll, display_facets=False):
+  def __init__(self, pcoll, include_window_info=False, display_facets=False):
     assert _pcoll_visualization_ready, (
         'Dependencies for PCollection visualization are not available. Please '
         'use `pip install apache-beam[interactive]` to install necessary '
@@ -203,6 +210,8 @@ class PCollectionVisualization(object):
     self._overview_display_id = 'facets_overview_{}_{}'.format(
         self._cache_key, id(self))
     self._df_display_id = 'df_{}_{}'.format(self._cache_key, id(self))
+    # Whether the visualization should include window info.
+    self._include_window_info = include_window_info
     # Whether facets widgets should be displayed.
     self._display_facets = display_facets
 
@@ -225,7 +234,7 @@ class PCollectionVisualization(object):
           elements,
           self._pcoll.element_type,
           prefix=self._pcoll_var,
-          include_window_info=True)
+          include_window_info=self._include_window_info)
       # Displays a data-table with at most 25 entries from the head.
       data_sample = data.head(25)
       display(data_sample)
@@ -250,7 +259,7 @@ class PCollectionVisualization(object):
         elements,
         self._pcoll.element_type,
         prefix=self._pcoll_var,
-        include_window_info=True)
+        include_window_info=self._include_window_info)
     if updating_pv:
       # Only updates when data is not empty. Otherwise, consider it a bad
       # iteration and noop since there is nothing to be updated.
