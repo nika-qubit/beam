@@ -226,8 +226,11 @@ class PCollectionVisualization(object):
     # the function.
     if _pcoll_visualization_ready:
       elements = _to_element_list(self._cache_key)
-      data = pcoll_to_df(elements, self._pcoll.element_type,
-                         prefix=self._pcoll_var, reify=True)
+      data = pcoll_to_df(
+          elements,
+          self._pcoll.element_type,
+          prefix=self._pcoll_var,
+          include_window_info=True)
       # Displays a data-table with at most 25 entries from the head.
       data_sample = data.head(25)
       display(data_sample)
@@ -248,8 +251,11 @@ class PCollectionVisualization(object):
     variable).
     """
     elements = _to_element_list(self._cache_key)
-    data = pcoll_to_df(elements, self._pcoll.element_type,
-                       prefix=self._pcoll_var, reify=True)
+    data = pcoll_to_df(
+        elements,
+        self._pcoll.element_type,
+        prefix=self._pcoll_var,
+        include_window_info=True)
     if updating_pv:
       # Only updates when data is not empty. Otherwise, consider it a bad
       # iteration and noop since there is nothing to be updated.
@@ -299,8 +305,7 @@ class PCollectionVisualization(object):
   def _display_dataframe(self, data, update=None):
     table_id = 'table_{}'.format(update if update else self._df_display_id)
     html = _DATAFRAME_PAGINATION_TEMPLATE.format(
-        dataframe_html=data.to_html(notebook=True,
-                                    table_id=table_id),
+        dataframe_html=data.to_html(notebook=True, table_id=table_id),
         table_id=table_id)
     if update:
       update_display(HTML(html), display_id=update)

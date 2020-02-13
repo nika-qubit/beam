@@ -123,19 +123,20 @@ class InteractiveRunnerTest(unittest.TestCase):
     # Truncate the precision to millis because the window coder uses millis
     # as units then gets upcast to micros.
     end_of_window = (GlobalWindow().max_timestamp().micros // 1000) * 1000
-    df_counts = ib.collect(counts, reify=True)
+    df_counts = ib.collect(counts, include_window_info=True)
     df_expected = pd.DataFrame({
         'counts[0]': [e[0] for e in actual.items()],
         'counts[1]': [e[1] for e in actual.items()],
         'event_time': [end_of_window for _ in actual],
         'windows': [[GlobalWindow()] for _ in actual],
-        'pane_info': [PaneInfo(True, True, PaneInfoTiming.ON_TIME, 0, 0)
-                      for _ in actual]
+        'pane_info': [
+            PaneInfo(True, True, PaneInfoTiming.ON_TIME, 0, 0) for _ in actual
+        ]
     })
 
     pd.testing.assert_frame_equal(df_expected, df_counts)
 
-    actual_reified = result.get(counts, reify=True)
+    actual_reified = result.get(counts, include_window_info=True)
     expected_reified = [
         WindowedValue(e, Timestamp(micros=end_of_window), [GlobalWindow()],
                       PaneInfo(True, True, PaneInfoTiming.ON_TIME, 0, 0))
