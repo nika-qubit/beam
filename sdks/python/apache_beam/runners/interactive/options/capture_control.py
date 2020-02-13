@@ -35,7 +35,7 @@ class CaptureControl(object):
   """Options and their utilities that controls how Interactive Beam captures
   deterministic replayable data from sources."""
   def __init__(self):
-    self._enable_capture = True
+    self._enable_capture_replay = True
     self._capturable_sources = {
         ReadFromPubSub,
     }  # yapf: disable
@@ -63,7 +63,7 @@ def evict_captured_data():
   """Evicts all deterministic replayable data that have been captured by
   Interactive Beam. In future PCollection evaluation/visualization and pipeline
   runs, Interactive Beam will capture fresh data."""
-  if ie.current_env().options.enable_capture:
+  if ie.current_env().options.enable_capture_replay:
     _LOGGER.info(
         'You have requested Interactive Beam to evict all captured '
         'data that could be deterministically replayed among multiple '

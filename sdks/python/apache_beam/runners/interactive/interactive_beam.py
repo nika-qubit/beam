@@ -51,20 +51,20 @@ from apache_beam.runners.interactive.utils import pcoll_to_df
 class Options(interactive_options.InteractiveOptions):
   """Options that guide how Interactive Beam works."""
   @property
-  def enable_capture(self):
+  def enable_capture_replay(self):
     """Whether replayable source data capture should be replayed for multiple
     PCollection evaluations and pipeline runs as long as the data captured is
     still valid."""
-    return self.capture_control._enable_capture
+    return self.capture_control._enable_capture_replay
 
-  @enable_capture.setter
-  def enable_capture(self, value):
+  @enable_capture_replay.setter
+  def enable_capture_replay(self, value):
     """Sets whether source data capture should be replayed. True - Enables
     capture of replayable source data so that following PCollection evaluations
     and pipeline runs always use the same data captured; False - Disables
     capture of replayable source data so that following PCollection evaluation
     and pipeline runs always use new data from sources."""
-    self.capture_control._enable_capture = value
+    self.capture_control._enable_capture_replay = value
 
   @property
   def capturable_sources(self):

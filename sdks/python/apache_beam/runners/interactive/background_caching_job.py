@@ -268,7 +268,7 @@ def is_source_to_cache_changed(
   # The computation of extract_unbounded_source_signature is expensive, track on
   # change by default.
   if is_changed and update_cached_source_signature:
-    if ie.current_env().options.enable_capture:
+    if ie.current_env().options.enable_capture_replay:
       if not recorded_signature:
           _LOGGER.info(
               'Interactive Beam has detected you have unbounded sources '
@@ -278,8 +278,8 @@ def is_source_to_cache_changed(
       else:
           _LOGGER.info(
               'Interactive Beam has detected a new streaming source was '
-              'added to the pipeline. In order for the cached streaming '
-              'data to start at the same time, all caches have been '
+              'added to the pipeline. In order for the captured streaming '
+              'data to start at the same time, all captured data have been '
               'cleared. {}'.format(ie.current_env().options.capture_control))
 
     ie.current_env().cleanup()
