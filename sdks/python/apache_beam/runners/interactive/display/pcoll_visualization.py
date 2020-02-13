@@ -293,7 +293,7 @@ class PCollectionVisualization(object):
       display(HTML(html))
 
   def _display_overview(self, data, update=None):
-    if not data.empty:
+    if not data.empty and self._include_window_info:
       data = data.drop(['event_time', 'windows', 'pane_info'], axis=1)
 
     gfsg = GenericFeatureStatisticsGenerator()
