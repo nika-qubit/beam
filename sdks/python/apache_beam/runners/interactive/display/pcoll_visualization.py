@@ -152,7 +152,7 @@ def visualize(pcoll, dynamic_plotting_interval=None, include_window_info=False,
     logging.getLogger('timeloop').disabled = True
     tl = Timeloop()
 
-    def dynamic_plotting(pcoll, pv, tl, display_facets):
+    def dynamic_plotting(pcoll, pv, tl, include_window_info, display_facets):
       @tl.job(interval=timedelta(seconds=dynamic_plotting_interval))
       def continuous_update_display():  # pylint: disable=unused-variable
         # Always creates a new PCollVisualization instance when the
@@ -162,7 +162,8 @@ def visualize(pcoll, dynamic_plotting_interval=None, include_window_info=False,
         # plotting interval information when instantiated because it's already
         # in dynamic plotting logic.
         updated_pv = PCollectionVisualization(
-            pcoll, display_facets=display_facets)
+            pcoll, include_window_info=include_window_info,
+            display_facets=display_facets)
         updated_pv.display(updating_pv=pv)
         if ie.current_env().is_terminated(pcoll.pipeline):
           try:
@@ -174,7 +175,7 @@ def visualize(pcoll, dynamic_plotting_interval=None, include_window_info=False,
       tl.start()
       return tl
 
-    return dynamic_plotting(pcoll, pv, tl, display_facets)
+    return dynamic_plotting(pcoll, pv, tl, include_window_info, display_facets)
   return None
 
 
