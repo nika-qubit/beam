@@ -25,6 +25,7 @@ from apache_beam.utils.windowed_value import WindowedValue
 
 COLUMN_PREFIX = 'el'
 
+
 def parse_row_(el, element_type, depth):
   elements = []
   columns = []
@@ -42,8 +43,9 @@ def parse_row_(el, element_type, depth):
       elements += underlying_elements
 
   # Don't make new columns for variable length types.
-  elif isinstance(element_type, (th.ListHint.ListConstraint,
-                                 th.TupleHint.TupleSequenceConstraint)):
+  elif isinstance(
+      element_type,
+      (th.ListHint.ListConstraint, th.TupleHint.TupleSequenceConstraint)):
     elements = [pd.array(el)]
 
   # For any other types, try to parse as a namedtuple, otherwise pass element
@@ -59,11 +61,12 @@ def parse_row_(el, element_type, depth):
       elements = [el]
   return columns, elements
 
-def parse_row(el, element_type, reify=True, prefix=COLUMN_PREFIX):
+
+def parse_row(el, element_type, include_window_info=True, prefix=COLUMN_PREFIX):
   # Reify the WindowedValue data to the Dataframe if asked.
   windowed = None
   if isinstance(el, WindowedValue):
-    if reify:
+    if include_window_info:
       windowed = el
     el = el.value
 
@@ -83,11 +86,14 @@ def parse_row(el, element_type, reify=True, prefix=COLUMN_PREFIX):
   # Reify the windowed columns and do a best-effort casting into Pandas DTypes.
   if windowed:
     columns += ['event_time', 'windows', 'pane_info']
-    elements += [windowed.timestamp.micros, windowed.windows,
-                 windowed.pane_info]
+    elements += [
+        windowed.timestamp.micros, windowed.windows, windowed.pane_info
+    ]
   return columns, elements
 
-def pcoll_to_df(elements, element_type, reify=False, prefix=COLUMN_PREFIX):
+
+def pcoll_to_df(
+    elements, element_type, include_window_info=False, prefix=COLUMN_PREFIX):
   """Parses the given elements into a Dataframe.
 
   Each column name will be prefixed with `prefix` concatenated with the nested
@@ -98,7 +104,7 @@ def pcoll_to_df(elements, element_type, reify=False, prefix=COLUMN_PREFIX):
   columns = []
 
   for e in elements:
-    columns, row = parse_row(e, element_type, reify, prefix=prefix)
+    columns, row = parse_row(e, element_type, include_window_info, prefix=prefix)
     rows.append(row)
 
   return pd.DataFrame(rows, columns=columns)

@@ -235,11 +235,11 @@ class PipelineResult(beam.runners.runner.PipelineResult):
   def wait_until_finish(self):
     self._underlying_result.wait_until_finish()
 
-  def get(self, pcoll, reify=False):
+  def get(self, pcoll, include_window_info=False):
     """Materializes the PCollection into a list.
 
-    If reify is True, then returns the elements as WindowedValues. Otherwise,
-    return the element as itself.
+    If include_window_info is True, then returns the elements as
+    WindowedValues. Otherwise, return the element as itself.
     """
     key = self._pipeline_instrument.cache_key(pcoll)
     cache_manager = ie.current_env().cache_manager()
@@ -256,9 +256,11 @@ class PipelineResult(beam.runners.runner.PipelineResult):
               coder = cache_manager.load_pcoder('full', key)
               decoded = coder.decode(tv.encoded_element)
               results.append(
-                  WindowedValue(**decoded) if reify else decoded['value'])
+                  WindowedValue(
+                      **decoded) if include_window_info else decoded['value'])
         else:
-          results.append(WindowedValue(**e) if reify else e['value'])
+          results.append(
+              WindowedValue(**e) if include_window_info else e['value'])
       return results
     else:
       raise ValueError('PCollection not available, please run the pipeline.')

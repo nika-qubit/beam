@@ -270,7 +270,7 @@ def show(*pcolls, visualize_data=False):
     ie.current_env().mark_pcollection_computed(pcolls)
 
 
-def collect(pcoll, reify=True):
+def collect(pcoll, include_window_info=True):
   """Materializes all of the elements from a PCollection into a Dataframe.
 
   For example::
@@ -283,10 +283,10 @@ def collect(pcoll, reify=True):
     in_memory_square = collect(square)
   """
   max_size = sys.maxsize if hasattr(sys, 'maxsize') else sys.maxint
-  return head(pcoll, n=max_size, reify=reify)
+  return head(pcoll, n=max_size, include_window_info=include_window_info)
 
 
-def head(pcoll, n=5, reify=True):
+def head(pcoll, n=5, include_window_info=True):
   """Materializes the first n elements from a PCollection into a Dataframe.
 
   This reads each element from file and reads only the amount that it needs
@@ -339,7 +339,7 @@ def head(pcoll, n=5, reify=True):
   result.wait_until_finish()
 
   results = []
-  for e in result.get(pcoll, reify=reify):
+  for e in result.get(pcoll, include_window_info=include_window_info):
     results.append(e)
     if len(results) >= n:
       break
@@ -353,7 +353,11 @@ def head(pcoll, n=5, reify=True):
   pin = pi.PipelineInstrument(user_pipeline)
   pcoll_id = pin.pcolls_to_pcoll_id[str(pcoll)]
   pcoll_var = pin.cacheable_var_by_pcoll_id(pcoll_id)
-  return pcoll_to_df(results, pcoll.element_type, reify=reify, prefix=pcoll_var)
+  return pcoll_to_df(
+      results,
+      pcoll.element_type,
+      include_window_info=include_window_info,
+      prefix=pcoll_var)
 
 
 def show_graph(pipeline):
