@@ -161,7 +161,7 @@ def watch(watchable):
   ie.current_env().watch(watchable)
 
 
-def show(*pcolls, visualize_data=False):
+def show(*pcolls, include_window_info=False, visualize_data=False):
   """Visualizes given PCollections in an interactive exploratory way if used
   within a notebook, or prints a heading sampled data if used within an ipython
   shell. Noop if used in a non-interactive environment.
@@ -253,9 +253,10 @@ def show(*pcolls, visualize_data=False):
   # If in notebook, dynamic plotting as computation goes.
   if ie.current_env().is_in_notebook:
     for pcoll in pcolls:
-      visualize(pcoll,
-                dynamic_plotting_interval=1,
-                display_facets=visualize_data)
+      visualize(
+          pcoll, dynamic_plotting_interval=1,
+          include_window_info=include_window_info,
+          display_facets=visualize_data)
 
   # Invoke wait_until_finish to ensure the blocking nature of this API without
   # relying on the run to be blocking.
@@ -264,7 +265,7 @@ def show(*pcolls, visualize_data=False):
   # If just in ipython shell, plotting once when the computation is completed.
   if ie.current_env().is_in_ipython and not ie.current_env().is_in_notebook:
     for pcoll in pcolls:
-      visualize(pcoll)
+      visualize(pcoll, include_window_info=include_window_info)
 
   # If the pipeline execution is successful at this stage, mark the computation
   # completeness for the given PCollections so that when further `show`
@@ -273,7 +274,7 @@ def show(*pcolls, visualize_data=False):
     ie.current_env().mark_pcollection_computed(pcolls)
 
 
-def collect(pcoll, include_window_info=True):
+def collect(pcoll, include_window_info=False):
   """Materializes all of the elements from a PCollection into a Dataframe.
 
   For example::
@@ -289,7 +290,7 @@ def collect(pcoll, include_window_info=True):
   return head(pcoll, n=max_size, include_window_info=include_window_info)
 
 
-def head(pcoll, n=5, include_window_info=True):
+def head(pcoll, n=5, include_window_info=False):
   """Materializes the first n elements from a PCollection into a Dataframe.
 
   This reads each element from file and reads only the amount that it needs
