@@ -58,9 +58,24 @@ _LOGGER = logging.getLogger(__name__)
 # 1-d types that need additional normalization to be compatible with DataFrame.
 _one_dimension_types = (int, float, str, bool, list, tuple)
 
+_CSS = """
+            <style>
+              .p-Widget.jp-OutputPrompt.jp-OutputArea-prompt:empty {{
+                padding: 0;
+                border: 0;
+              }}
+              .p-Widget.jp-RenderedJavaScript.jp-mod-trusted.jp-OutputArea-output:empty {{
+                padding: 0;
+                border: 0;
+              }}
+            </style>"""
 _DIVE_SCRIPT_TEMPLATE = """
-            document.querySelector("#{display_id}").data = {jsonstr};"""
-_DIVE_HTML_TEMPLATE = """
+            try {{
+              document.querySelector("#{display_id}").data = {jsonstr};
+            }} catch (e) {{
+              console.log("#{display_id} is not rendered yet.")
+            }}"""
+_DIVE_HTML_TEMPLATE = _CSS + """
             <script src="https://cdnjs.cloudflare.com/ajax/libs/webcomponentsjs/1.3.3/webcomponents-lite.js"></script>
             <link rel="import" href="https://raw.githubusercontent.com/PAIR-code/facets/1.0.0/facets-dist/facets-jupyter.html">
             <facets-dive sprite-image-width="{sprite_size}" sprite-image-height="{sprite_size}" id="{display_id}" height="600"></facets-dive>
@@ -68,44 +83,62 @@ _DIVE_HTML_TEMPLATE = """
               document.querySelector("#{display_id}").data = {jsonstr};
             </script>"""
 _OVERVIEW_SCRIPT_TEMPLATE = """
-              document.querySelector("#{display_id}").protoInput = "{protostr}";
-              """
-_OVERVIEW_HTML_TEMPLATE = """
+              try {{
+                document.querySelector("#{display_id}").protoInput = "{protostr}";
+              }} catch (e) {{
+                console.log("#{display_id} is not rendered yet.")
+              }}"""
+_OVERVIEW_HTML_TEMPLATE = _CSS + """
             <script src="https://cdnjs.cloudflare.com/ajax/libs/webcomponentsjs/1.3.3/webcomponents-lite.js"></script>
             <link rel="import" href="https://raw.githubusercontent.com/PAIR-code/facets/1.0.0/facets-dist/facets-jupyter.html">
             <facets-overview id="{display_id}"></facets-overview>
             <script>
               document.querySelector("#{display_id}").protoInput = "{protostr}";
             </script>"""
-_DATAFRAME_PAGINATION_TEMPLATE = """
-            <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.2.2/jquery.min.js"></script>
-            <script src="https://cdn.datatables.net/1.10.20/js/jquery.dataTables.min.js"></script>
+_DATAFRAME_PAGINATION_TEMPLATE = _CSS + """
             <link rel="stylesheet" href="https://cdn.datatables.net/1.10.20/css/jquery.dataTables.min.css">
             {dataframe_html}
             <script>
-              $(document).ready(
-                function() {{
-                  $("#{table_id}").DataTable({{
-                    columnDefs: [
-                      {{
-                        targets: "_all",
-                        className: "dt-left"
-                      }},
-                      {{
-                        "targets": 0,
-                        "width": "10px",
-                        "title": ""
-                      }}
-                    ]
-                  }});
+              function dataframe_as_datatable() {{
+                var scripts_to_load = [];
+                if (typeof jQuery == "undefined") {{
+                  scripts_to_load.push("https://ajax.googleapis.com/ajax/libs/jquery/2.2.4/jquery.min.js");
+                  scripts_to_load.push("https://cdn.datatables.net/1.10.20/js/jquery.dataTables.min.js");
+                }} else if (typeof jQuery.fn.DataTable == "undefined") {{
+                  scripts_to_load.push("https://cdn.datatables.net/1.10.20/js/jquery.dataTables.min.js");
+                }}
+                scripts_to_load.forEach(function(src) {{
+                  var script = document.createElement('script');
+                  script.src = src;
+                  document.head.appendChild(script)
                 }});
+                if (scripts_to_load.length == 0) {{
+                  jQuery(document).ready(function($) {{
+                    $("#{table_id}").DataTable({{
+                      columnDefs: [
+                        {{
+                          targets: "_all",
+                          className: "dt-left"
+                        }},
+                        {{
+                          "targets": 0,
+                          "width": "10px",
+                          "title": ""
+                        }}
+                      ]
+                    }});
+                  }});
+                }}
+              }}
+              dataframe_as_datatable();
             </script>"""
 
 
-def visualize(pcoll,
-              dynamic_plotting_interval=None,
-              include_window_info=False,
-              display_facets=False):
+def visualize(
+    pcoll,
+    dynamic_plotting_interval=None,
+    include_window_info=False,
+    display_facets=False):
   """Visualizes the data of a given PCollection. Optionally enables dynamic
   plotting with interval in seconds if the PCollection is being produced by a
   running pipeline or the pipeline is streaming indefinitely. The function
@@ -164,7 +197,8 @@ def visualize(pcoll,
         # plotting interval information when instantiated because it's already
         # in dynamic plotting logic.
         updated_pv = PCollectionVisualization(
-            pcoll, include_window_info=include_window_info,
+            pcoll,
+            include_window_info=include_window_info,
             display_facets=display_facets)
         updated_pv.display(updating_pv=pv)
         if ie.current_env().is_terminated(pcoll.pipeline):
@@ -250,7 +284,6 @@ class PCollectionVisualization(object):
         display_id of each visualization part will inherit from the initial
         display of updating_pv and only update that visualization web element
         instead of creating new ones.
-      display_facets:
 
     The visualization has 3 parts: facets-dive, facets-overview and paginated
     data table. Each part is assigned an auto-generated unique display id
@@ -263,6 +296,9 @@ class PCollectionVisualization(object):
         self._pcoll.element_type,
         prefix=self._pcoll_var,
         include_window_info=self._include_window_info)
+    # String-ify the dictionaries for display because elements of type dict
+    # cannot be ordered.
+    data = data.applymap(lambda x: str(x) if isinstance(x, dict) else x)
     if updating_pv:
       # Only updates when data is not empty. Otherwise, consider it a bad
       # iteration and noop since there is nothing to be updated.
@@ -318,6 +354,7 @@ class PCollectionVisualization(object):
       update_display(HTML(html), display_id=update)
     else:
       display(HTML(html), display_id=self._df_display_id)
+
 
 def _to_element_list(cache_key):
   pcoll_list = iter([])
