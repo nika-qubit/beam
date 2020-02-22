@@ -267,19 +267,28 @@ def is_source_to_cache_changed(user_pipeline,
   # The computation of extract_unbounded_source_signature is expensive, track on
   # change by default.
   if is_changed and update_cached_source_signature:
-    if ie.current_env().options.enable_capture_replay:
-      if not recorded_signature:
-          _LOGGER.info(
-              'Interactive Beam has detected you have unbounded sources '
-              'in your pipeline. In order to have a deterministic replay '
-              'of your pipeline: {}'.format(
-                  ie.current_env().options.capture_control))
-      else:
-          _LOGGER.info(
-              'Interactive Beam has detected a new streaming source was '
-              'added to the pipeline. In order for the captured streaming '
-              'data to start at the same time, all captured data have been '
-              'cleared. {}'.format(ie.current_env().options.capture_control))
+    options = ie.current_env().options
+    def sizeof_fmt(num, suffix='B'):
+      for unit in ['','K','M','G','T','P','E','Z']:
+        if abs(num) < 1000.0:
+          return "%3.1f%s%s" % (num, unit, suffix)
+        num /= 1000.0
+      return "%.1f%s%s" % (num, 'Yi', suffix)
+
+    if not recorded_signature:
+      _LOGGER.info(
+          'Interactive Beam has detected unbounded sources in your pipeline. '
+          'In order to have a deterministic replay, a segment of data will be '
+          'recorded from all sources for {} seconds or until a total of {} '
+          'have been written to disk.'.format(
+              options.capture_duration.total_seconds(),
+              sizeof_fmt(options.capture_size)))
+    else:
+      _LOGGER.info(
+          'Interactive Beam has detected a new streaming source was '
+          'added to the pipeline. In order for the cached streaming '
+          'data to start at the same time, all captured data has been '
+          'cleared and a new segment of data will be recorded.')
 
     ie.current_env().cleanup()
     ie.current_env().set_cached_source_signature(

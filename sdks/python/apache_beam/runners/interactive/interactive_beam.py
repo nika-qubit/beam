@@ -91,6 +91,8 @@ class Options(interactive_options.InteractiveOptions):
       # and the data captured will be replayed until another eviction.
       interactive_beam.collect(some_pcoll)
     """
+    assert value.total_seconds() > 0, \
+        'Duration must be a positive value.'
     self.capture_control._capture_duration = value
 
   @property
@@ -109,6 +111,52 @@ class Options(interactive_options.InteractiveOptions):
       interactive_beam.options.capture_size = 1e9
     """
     self.capture_control._capture_size = value
+
+  @property
+  def display_timestamp_format(self):
+    """The format in which timestamps are displayed.
+
+    Default is '%Y-%m-%d %H:%M:%S.%f%z', e.g. 2020-02-01 15:05:06.000015-08:00.
+    """
+    return self._display_timestamp_format
+
+  @display_timestamp_format.setter
+  def display_timestamp_format(self, value):
+    """Sets the format in which timestamps are displayed.
+
+    Default is '%Y-%m-%d %H:%M:%S.%f%z', e.g. 2020-02-01 15:05:06.000015-08:00.
+
+    Example::
+
+      # Sets the format to not display the timezone or microseconds.
+      interactive_beam.options.display_timestamp_format = %Y-%m-%d %H:%M:%S'
+    """
+    self._display_timestamp_format = value
+
+  @property
+  def display_timezone(self):
+    """The timezone in which timestamps are displayed.
+
+    Defaults to local timezone.
+    """
+    return self._display_timezone
+
+  @display_timezone.setter
+  def display_timezone(self, value):
+    """Sets the timezone in which timestamps are displayed.
+
+    Defaults to local timezone.
+
+    Example::
+
+      # Imports the timezone library.
+      from pytz import timezone
+
+      # Will display all timestamps in the US/Eastern time zone.
+      tz = timezone('US/Eastern')
+      interactive_beam.options.capture_size = tz
+    """
+    self._display_timezone = value
 
 
 # Users can set options to guide how Interactive Beam works.

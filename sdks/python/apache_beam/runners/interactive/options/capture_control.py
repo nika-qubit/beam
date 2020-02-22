@@ -42,15 +42,6 @@ class CaptureControl(object):
     self._capture_duration = timedelta(seconds=5)
     self._capture_size = 1e9
 
-  def __repr__(self):
-    return (
-        'A segment of data will be recorded for {} seconds or until it'
-        ' takes up {} bytes of disk space, whichever limit is reached'
-        ' first, for all {} typed sources in the pipeline.'.format(
-            self._capture_duration.total_seconds(),
-            self._capture_size,
-            self._capturable_sources))
-
   def is_capture_size_reached(self):
     """Determines if the capture size has been reached."""
     cache_manager = ie.current_env().cache_manager()

@@ -25,15 +25,19 @@ Only works with Python 3.5+.
 from __future__ import absolute_import
 
 import base64
+import datetime
 import logging
 import sys
 from datetime import timedelta
+from dateutil import tz
 
 from apache_beam import pvalue
 from apache_beam.portability.api.beam_runner_api_pb2 import TestStreamPayload
 from apache_beam.runners.interactive import interactive_environment as ie
 from apache_beam.runners.interactive import pipeline_instrument as instr
 from apache_beam.runners.interactive.utils import pcoll_to_df
+from apache_beam.transforms.window import GlobalWindow
+from apache_beam.transforms.window import IntervalWindow
 from apache_beam.utils.windowed_value import WindowedValue
 
 try:
@@ -346,9 +350,74 @@ class PCollectionVisualization(object):
       display(HTML(html))
 
   def _display_dataframe(self, data, update=None):
+
+    def event_time_formatter(event_time_us):
+      options = ie.current_env().options
+      to_tz = options.display_timezone
+      return (datetime.datetime.utcfromtimestamp(event_time_us / 1000000)
+              .replace(tzinfo=tz.tzutc())
+              .astimezone(to_tz)
+              .strftime(options.display_timestamp_format))
+
+    def windows_formatter(windows):
+      result = []
+      for w in windows:
+        if isinstance(w, GlobalWindow):
+          result.append(str(w))
+        elif isinstance(w, IntervalWindow):
+          # First get the duration in terms of hours, minutes, seconds, and
+          # micros.
+          duration = w.end.micros - w.start.micros
+          duration_secs = duration // 1000000
+          hours, remainder = divmod(duration_secs, 3600)
+          minutes, seconds = divmod(remainder, 60)
+          micros = (duration - duration_secs * 1000000) % 1000000
+
+          # Construct the duration string. Try and write the string in such a
+          # way that minimizes the amount of characters written.
+          duration = ''
+          if hours:
+            duration += '{}h '.format(hours)
+
+          if minutes or (hours and seconds):
+            duration += '{}m '.format(minutes)
+
+          if seconds:
+            if micros:
+              duration += '{}.{:06}s'.format(seconds, micros)
+            else:
+              duration += '{}s'.format(seconds)
+
+          options = ie.current_env().options
+          to_tz = options.display_timezone
+          start = event_time_formatter(w.start.micros)
+
+          result.append('{} ({})'.format(start, duration))
+
+      return ','.join(result)
+
+    def pane_info_formatter(pane_info):
+      from apache_beam.utils.windowed_value import PaneInfo
+      from apache_beam.utils.windowed_value import PaneInfoTiming
+      assert isinstance(pane_info, PaneInfo)
+
+      result = 'Pane {}: {} {}'.format(
+          pane_info.index,
+          'Final' if pane_info.is_last else '',
+          PaneInfoTiming.to_string(pane_info.timing).lower().capitalize()
+          if pane_info.timing in (PaneInfoTiming.EARLY, PaneInfoTiming.LATE)
+          else '')
+      return result
+
+
     table_id = 'table_{}'.format(update if update else self._df_display_id)
     html = _DATAFRAME_PAGINATION_TEMPLATE.format(
-        dataframe_html=data.to_html(notebook=True, table_id=table_id),
+        dataframe_html=data.to_html(notebook=True, table_id=table_id,
+        formatters={
+            'event_time': event_time_formatter,
+            'windows': windows_formatter,
+            'pane_info': pane_info_formatter
+        }),
         table_id=table_id)
     if update:
       update_display(HTML(html), display_id=update)
