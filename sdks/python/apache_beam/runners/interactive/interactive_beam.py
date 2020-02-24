@@ -235,7 +235,7 @@ def show(*pcolls, include_window_info=False, visualize_data=False):
         watched_pcollections.add(val)
   for pcoll in pcolls:
     if pcoll not in watched_pcollections:
-      watch({re.sub(r'[\[\]\(\)]', '_', str(pcoll)): pcoll})
+      watch({re.sub(r'[\[\]\(\)/]', '_', str(pcoll)): pcoll})
 
   import warnings
   warnings.filterwarnings('ignore', category=DeprecationWarning)
