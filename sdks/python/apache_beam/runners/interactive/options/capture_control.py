@@ -15,15 +15,14 @@
 # limitations under the License.
 #
 
-import logging
 from datetime import timedelta
 
 from apache_beam.io.gcp.pubsub import ReadFromPubSub
 from apache_beam.runners.interactive import background_caching_job as bcj
 from apache_beam.runners.interactive import interactive_environment as ie
+from apache_beam.utils.interactive_utils import info
 
-_LOGGER = logging.getLogger(__name__)
-_LOGGER.setLevel(logging.INFO)
+
 """Module to control how Interactive Beam captures data from sources for
 deterministic replayable PCollection evaluation and pipeline runs.
 
@@ -64,7 +63,7 @@ def evict_captured_data():
   Interactive Beam. In future PCollection evaluation/visualization and pipeline
   runs, Interactive Beam will capture fresh data."""
   if ie.current_env().options.enable_capture_replay:
-    _LOGGER.info(
+    info(
         'You have requested Interactive Beam to evict all captured '
         'data that could be deterministically replayed among multiple '
         'pipeline runs.')

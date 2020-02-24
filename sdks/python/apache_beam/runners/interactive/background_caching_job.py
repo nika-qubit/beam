@@ -39,7 +39,6 @@ invalidated.
 
 from __future__ import absolute_import
 
-import logging
 import threading
 import time
 
@@ -47,9 +46,7 @@ import apache_beam as beam
 from apache_beam.runners.interactive import interactive_environment as ie
 from apache_beam.runners.interactive.caching import streaming_cache
 from apache_beam.runners.runner import PipelineState
-
-_LOGGER = logging.getLogger(__name__)
-_LOGGER.setLevel(logging.INFO)
+from apache_beam.utils.interactive_utils import info
 
 
 class BackgroundCachingJob(object):
@@ -269,13 +266,13 @@ def is_source_to_cache_changed(user_pipeline,
   if is_changed and update_cached_source_signature:
     if ie.current_env().options.enable_capture_replay:
       if not recorded_signature:
-          _LOGGER.info(
+          info(
               'Interactive Beam has detected you have unbounded sources '
               'in your pipeline. In order to have a deterministic replay '
               'of your pipeline: {}'.format(
                   ie.current_env().options.capture_control))
       else:
-          _LOGGER.info(
+          info(
               'Interactive Beam has detected a new streaming source was '
               'added to the pipeline. In order for the captured streaming '
               'data to start at the same time, all captured data have been '
