@@ -15,6 +15,12 @@
 # limitations under the License.
 #
 
+"""Module to control how Interactive Beam captures data from sources for
+deterministic replayable PCollection evaluation and pipeline runs.
+
+For internal use only; no backwards-compatibility guarantees.
+"""
+
 import logging
 from datetime import timedelta
 
@@ -23,12 +29,6 @@ from apache_beam.runners.interactive import background_caching_job as bcj
 from apache_beam.runners.interactive import interactive_environment as ie
 
 _LOGGER = logging.getLogger(__name__)
-_LOGGER.setLevel(logging.INFO)
-"""Module to control how Interactive Beam captures data from sources for
-deterministic replayable PCollection evaluation and pipeline runs.
-
-For internal use only; no backwards-compatibility guarantees.
-"""
 
 
 class CaptureControl(object):

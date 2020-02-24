@@ -49,7 +49,6 @@ from apache_beam.runners.interactive.caching import streaming_cache
 from apache_beam.runners.runner import PipelineState
 
 _LOGGER = logging.getLogger(__name__)
-_LOGGER.setLevel(logging.INFO)
 
 
 class BackgroundCachingJob(object):
@@ -65,7 +64,6 @@ class BackgroundCachingJob(object):
   In both situations, the background caching job should be treated as done
   successfully.
   """
-
   def __init__(self, pipeline_result, start_limit_checkers=True):
     self._pipeline_result = pipeline_result
     self._timer = threading.Timer(
@@ -97,11 +95,10 @@ class BackgroundCachingJob(object):
 
   def is_done(self):
     return (
-        self._pipeline_result.state is PipelineState.DONE or (
-            (self._timer_triggered or
-             self._condition_checker_triggered) and
-            self._pipeline_result.state in (
-                PipelineState.CANCELLED, PipelineState.CANCELLING)))
+        self._pipeline_result.state is PipelineState.DONE or
+        ((self._timer_triggered or self._condition_checker_triggered) and
+         self._pipeline_result.state in
+         (PipelineState.CANCELLED, PipelineState.CANCELLING)))
 
   def is_running(self):
     return self._pipeline_result.state is PipelineState.RUNNING
@@ -166,18 +163,21 @@ def is_background_caching_job_needed(user_pipeline):
   # If this is True, we can invalidate a previous done/running job if there is
   # one.
   cache_changed = is_source_to_cache_changed(user_pipeline)
-  return (need_cache and
-          # Checks if it's the first time running a job from the pipeline.
-          (not job or
-           # Or checks if there is no previous job.
-           # DONE means a previous job has completed successfully and the
-           # cached events might still be valid.
-           not (job.is_done() or
-                # RUNNING means a previous job has been started and is still
-                # running.
-                job.is_running()) or
-           # Or checks if we can invalidate the previous job.
-           cache_changed))
+  return (
+      need_cache and
+      # Checks if it's the first time running a job from the pipeline.
+      (
+          not job or
+          # Or checks if there is no previous job.
+          # DONE means a previous job has completed successfully and the
+          # cached events might still be valid.
+          not (
+              job.is_done() or
+              # RUNNING means a previous job has been started and is still
+              # running.
+              job.is_running()) or
+          # Or checks if we can invalidate the previous job.
+          cache_changed))
 
 
 def has_source_to_cache(user_pipeline):
@@ -233,8 +233,7 @@ def attempt_to_stop_test_stream_service(user_pipeline):
   If there is no such server started, NOOP. Otherwise, stop it.
   """
   if is_a_test_stream_service_running(user_pipeline):
-    ie.current_env().evict_test_stream_service_controller(
-        user_pipeline).stop()
+    ie.current_env().evict_test_stream_service_controller(user_pipeline).stop()
 
 
 def is_a_test_stream_service_running(user_pipeline):
@@ -245,8 +244,8 @@ def is_a_test_stream_service_running(user_pipeline):
       user_pipeline) is not None
 
 
-def is_source_to_cache_changed(user_pipeline,
-                               update_cached_source_signature=True):
+def is_source_to_cache_changed(
+    user_pipeline, update_cached_source_signature=True):
   """Determines if there is any change in the sources that need to be cached
   used by the user-defined pipeline.
 
@@ -268,27 +267,30 @@ def is_source_to_cache_changed(user_pipeline,
   # change by default.
   if is_changed and update_cached_source_signature:
     options = ie.current_env().options
-    def sizeof_fmt(num, suffix='B'):
-      for unit in ['','K','M','G','T','P','E','Z']:
-        if abs(num) < 1000.0:
-          return "%3.1f%s%s" % (num, unit, suffix)
-        num /= 1000.0
-      return "%.1f%s%s" % (num, 'Yi', suffix)
+    # No info needed when capture replay is disabled.
+    if options.enable_capture_replay:
 
-    if not recorded_signature:
-      _LOGGER.info(
-          'Interactive Beam has detected unbounded sources in your pipeline. '
-          'In order to have a deterministic replay, a segment of data will be '
-          'recorded from all sources for {} seconds or until a total of {} '
-          'have been written to disk.'.format(
-              options.capture_duration.total_seconds(),
-              sizeof_fmt(options.capture_size)))
-    else:
-      _LOGGER.info(
-          'Interactive Beam has detected a new streaming source was '
-          'added to the pipeline. In order for the cached streaming '
-          'data to start at the same time, all captured data has been '
-          'cleared and a new segment of data will be recorded.')
+      def sizeof_fmt(num, suffix='B'):
+        for unit in ['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z']:
+          if abs(num) < 1000.0:
+            return "%3.1f%s%s" % (num, unit, suffix)
+          num /= 1000.0
+        return "%.1f%s%s" % (num, 'Yi', suffix)
+
+      if not recorded_signature:
+        _LOGGER.info(
+            'Interactive Beam has detected unbounded sources in your pipeline. '
+            'In order to have a deterministic replay, a segment of data will '
+            'be recorded from all sources for {} seconds or until a total of '
+            '{} have been written to disk.'.format(
+                options.capture_duration.total_seconds(),
+                sizeof_fmt(options.capture_size)))
+      else:
+        _LOGGER.info(
+            'Interactive Beam has detected a new streaming source was '
+            'added to the pipeline. In order for the cached streaming '
+            'data to start at the same time, all captured data has been '
+            'cleared and a new segment of data will be recorded.')
 
     ie.current_env().cleanup()
     ie.current_env().set_cached_source_signature(

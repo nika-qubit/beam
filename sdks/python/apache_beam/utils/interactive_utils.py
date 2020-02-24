@@ -100,3 +100,56 @@ def _extract_pipeline_of_pvalueish(pvalueish):
   if hasattr(pvalue, 'pipeline'):
     return pvalue.pipeline
   return None
+
+
+def register_ipython_log_handler():
+  """Adds the IPython handler to a dummy parent logger (named
+  'apache_beam.runners.interactive') of all interactive modules' loggers so that
+  if is_in_notebook, logging displays the logs as HTML in frontends."""
+  # apache_beam.runners.interactive is not a module, thus this "root" logger is
+  # a dummy one created to hold the IPython log handler. When children loggers
+  # have propagate as True (by default) and logging level as NOTSET (by default,
+  # so the "root" logger's logging level takes effect), the IPython log handler
+  # will be triggered at the "root"'s own logging level. And if a child logger
+  # sets its logging level, it can take control back.
+  interactive_root_logger = logging.getLogger('apache_beam.runners.interactive')
+  if any([isinstance(h, IPythonLogHandler)
+          for h in interactive_root_logger.handlers]):
+    return
+  interactive_root_logger.setLevel(logging.INFO)
+  interactive_root_logger.addHandler(IPythonLogHandler())
+  # Disable the propagation so that logs emitted from interactive modules should
+  # only be handled by loggers and handlers defined within interactive packages.
+  interactive_root_logger.propagate = False
+
+
+class IPythonLogHandler(logging.Handler):
+  """A logging handler to display logs as HTML in IPython backed frontends."""
+  log_template = """
+            <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css" integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh" crossorigin="anonymous">
+            <script src="https://code.jquery.com/jquery-3.4.1.slim.min.js" integrity="sha384-J6qa4849blE2+poT4WnyKhv5vZF5SrPo0iEjwBvKU7imGFAV0wwj1yYfoRSJoZ+n" crossorigin="anonymous"></script>
+            <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.0/dist/umd/popper.min.js" integrity="sha384-Q6E9RHvbIyZFJoft+2mJbHaEWldlvI9IOYy5n3zV9zzTtmI3UksdQRVvoxMfooAo" crossorigin="anonymous"></script>
+            <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/js/bootstrap.min.js" integrity="sha384-wfSDF2E50Y2D1uUdj0O3uMBJnjuUD4Ih7YwaYd1iqfktj0Uod8GCExl3Og8ifwB6" crossorigin="anonymous"></script>
+            <div class="alert alert-{level}">{msg}</div>"""
+
+  logging_to_alert_level_map = {
+      logging.CRITICAL: 'danger',
+      logging.ERROR: 'danger',
+      logging.WARNING: 'warning',
+      logging.INFO: 'info',
+      logging.DEBUG: 'dark',
+      logging.NOTSET: 'light'
+  }
+
+  def emit(self, record):
+    try:
+      from html import escape
+      from IPython.core.display import HTML
+      from IPython.core.display import display
+      display(
+          HTML(
+              self.log_template.format(
+                  level=self.logging_to_alert_level_map[record.levelno],
+                  msg=escape(record.msg))))
+    except ImportError:
+      pass  # NOOP when dependencies are not available.
