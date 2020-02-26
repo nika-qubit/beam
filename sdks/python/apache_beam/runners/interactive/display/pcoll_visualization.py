@@ -401,12 +401,16 @@ class PCollectionVisualization(object):
       from apache_beam.utils.windowed_value import PaneInfoTiming
       assert isinstance(pane_info, PaneInfo)
 
-      result = 'Pane {}: {} {}'.format(
-          pane_info.index,
-          'Final' if pane_info.is_last else '',
+      result = 'Pane {}'.format(pane_info.index)
+      timing_info = '{}{}'.format(
+          'Final ' if pane_info.is_last else '',
           PaneInfoTiming.to_string(pane_info.timing).lower().capitalize()
           if pane_info.timing in (PaneInfoTiming.EARLY, PaneInfoTiming.LATE)
           else '')
+
+      if timing_info:
+        result += ': ' + timing_info
+
       return result
 
 
