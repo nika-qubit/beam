@@ -84,9 +84,8 @@ class PCollectionVisualizationTest(unittest.TestCase):
     self.assertIsNone(pv.visualize(self._pcoll, display_facets=True))
 
   def test_dynamic_plotting_return_handle(self):
-    h = pv.visualize(self._pcoll,
-                     dynamic_plotting_interval=1,
-                     display_facets=True)
+    h = pv.visualize(
+        self._pcoll, dynamic_plotting_interval=1, display_facets=True)
     self.assertIsInstance(h, timeloop.Timeloop)
     h.stop()
 
@@ -114,31 +113,26 @@ class PCollectionVisualizationTest(unittest.TestCase):
     new_pcollection_visualization.display(
         updating_pv=original_pcollection_visualization)
     mocked_display_dataframe.assert_called_once_with(
-        ANY, original_pcollection_visualization._df_display_id)
+        ANY, original_pcollection_visualization)
     # Below assertions are still true without newer calls.
     mocked_display_overview.assert_called_once_with(
-        ANY, original_pcollection_visualization._overview_display_id)
+        ANY, original_pcollection_visualization)
     mocked_display_dive.assert_called_once_with(
-        ANY, original_pcollection_visualization._dive_display_id)
+        ANY, original_pcollection_visualization)
 
   def test_auto_stop_dynamic_plotting_when_job_is_terminated(self):
     fake_pipeline_result = runner.PipelineResult(runner.PipelineState.RUNNING)
-    ie.current_env().set_pipeline_result(
-        self._p,
-        fake_pipeline_result)
+    ie.current_env().set_pipeline_result(self._p, fake_pipeline_result)
     # When job is running, the dynamic plotting will not be stopped.
     self.assertFalse(ie.current_env().is_terminated(self._p))
 
     fake_pipeline_result = runner.PipelineResult(runner.PipelineState.DONE)
-    ie.current_env().set_pipeline_result(
-        self._p,
-        fake_pipeline_result)
+    ie.current_env().set_pipeline_result(self._p, fake_pipeline_result)
     # When job is done, the dynamic plotting will be stopped.
     self.assertTrue(ie.current_env().is_terminated(self._p))
 
   @patch('pandas.DataFrame.head')
-  def test_display_plain_text_when_kernel_has_no_frontend(self,
-                                                          _mocked_head):
+  def test_display_plain_text_when_kernel_has_no_frontend(self, _mocked_head):
     # Resets the notebook check to False.
     ie.current_env()._is_in_notebook = False
     self.assertIsNone(pv.visualize(self._pcoll, display_facets=True))

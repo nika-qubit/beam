@@ -64,20 +64,20 @@ _one_dimension_types = (int, float, str, bool, list, tuple)
 
 _CSS = """
             <style>
-              .p-Widget.jp-OutputPrompt.jp-OutputArea-prompt:empty {{
-                padding: 0;
-                border: 0;
-              }}
-              .p-Widget.jp-RenderedJavaScript.jp-mod-trusted.jp-OutputArea-output:empty {{
-                padding: 0;
-                border: 0;
-              }}
+            .p-Widget.jp-OutputPrompt.jp-OutputArea-prompt:empty {{
+              padding: 0;
+              border: 0;
+            }}
+            .p-Widget.jp-RenderedJavaScript.jp-mod-trusted.jp-OutputArea-output:empty {{
+              padding: 0;
+              border: 0;
+            }}
             </style>"""
 _DIVE_SCRIPT_TEMPLATE = """
             try {{
               document.querySelector("#{display_id}").data = {jsonstr};
             }} catch (e) {{
-              console.log("#{display_id} is not rendered yet.")
+              console.log("#{display_id} is not rendered yet.");
             }}"""
 _DIVE_HTML_TEMPLATE = _CSS + """
             <script src="https://cdnjs.cloudflare.com/ajax/libs/webcomponentsjs/1.3.3/webcomponents-lite.js"></script>
@@ -90,7 +90,7 @@ _OVERVIEW_SCRIPT_TEMPLATE = """
               try {{
                 document.querySelector("#{display_id}").protoInput = "{protostr}";
               }} catch (e) {{
-                console.log("#{display_id} is not rendered yet.")
+                console.log("#{display_id} is not rendered yet.");
               }}"""
 _OVERVIEW_HTML_TEMPLATE = _CSS + """
             <script src="https://cdnjs.cloudflare.com/ajax/libs/webcomponentsjs/1.3.3/webcomponents-lite.js"></script>
@@ -99,42 +99,39 @@ _OVERVIEW_HTML_TEMPLATE = _CSS + """
             <script>
               document.querySelector("#{display_id}").protoInput = "{protostr}";
             </script>"""
+_DATATABLE_INITIALIZATION_CONFIG = """
+            columns: {columns},
+            destroy: true,
+            responsive: true,
+            columnDefs: [
+              {{
+                targets: "_all",
+                className: "dt-left"
+              }},
+              {{
+                "targets": 0,
+                "width": "10px",
+                "title": ""
+              }}
+            ]"""
+_DATAFRAME_SCRIPT_TEMPLATE = """
+            var dt;
+            if ($.fn.dataTable.isDataTable("#{table_id}")) {{
+              dt = $("#{table_id}").dataTable();
+            }} else {{
+              dt = $("#{table_id}").dataTable({{
+                """ + _DATATABLE_INITIALIZATION_CONFIG + """
+              }});
+            }}
+            dt.api()
+              .clear()
+              .rows.add({data_as_rows})
+              .draw('full-hold');"""
 _DATAFRAME_PAGINATION_TEMPLATE = _CSS + """
             <link rel="stylesheet" href="https://cdn.datatables.net/1.10.20/css/jquery.dataTables.min.css">
-            {dataframe_html}
+            <table id="{table_id}" class="display"></table>
             <script>
-              function dataframe_as_datatable() {{
-                var scripts_to_load = [];
-                if (typeof jQuery == "undefined") {{
-                  scripts_to_load.push("https://ajax.googleapis.com/ajax/libs/jquery/2.2.4/jquery.min.js");
-                  scripts_to_load.push("https://cdn.datatables.net/1.10.20/js/jquery.dataTables.min.js");
-                }} else if (typeof jQuery.fn.DataTable == "undefined") {{
-                  scripts_to_load.push("https://cdn.datatables.net/1.10.20/js/jquery.dataTables.min.js");
-                }}
-                scripts_to_load.forEach(function(src) {{
-                  var script = document.createElement('script');
-                  script.src = src;
-                  document.head.appendChild(script)
-                }});
-                if (scripts_to_load.length == 0) {{
-                  jQuery(document).ready(function($) {{
-                    $("#{table_id}").DataTable({{
-                      columnDefs: [
-                        {{
-                          targets: "_all",
-                          className: "dt-left"
-                        }},
-                        {{
-                          "targets": 0,
-                          "width": "10px",
-                          "title": ""
-                        }}
-                      ]
-                    }});
-                  }});
-                }}
-              }}
-              dataframe_as_datatable();
+              {script_in_jquery_with_datatable}
             </script>"""
 
 
@@ -255,6 +252,8 @@ class PCollectionVisualization(object):
     self._include_window_info = include_window_info
     # Whether facets widgets should be displayed.
     self._display_facets = display_facets
+    # Whether datatable rendered from data is empty.
+    self._is_datatable_empty = True
 
     pcoll_id = self._pin.pcolls_to_pcoll_id[str(pcoll)]
     self._pcoll_var = self._pin.cacheable_var_by_pcoll_id(pcoll_id)
@@ -309,22 +308,23 @@ class PCollectionVisualization(object):
       if data.empty:
         _LOGGER.debug('Skip a visualization update due to empty data.')
       else:
-        self._display_dataframe(data, updating_pv._df_display_id)
+        self._display_dataframe(data.copy(deep=True), updating_pv)
         if self._display_facets:
-          self._display_dive(data, updating_pv._dive_display_id)
-          self._display_overview(data, updating_pv._overview_display_id)
+          self._display_dive(data.copy(deep=True), updating_pv)
+          self._display_overview(data.copy(deep=True), updating_pv)
     else:
-      self._display_dataframe(data)
+      self._display_dataframe(data.copy(deep=True))
       if self._display_facets:
-        self._display_dive(data)
-        self._display_overview(data)
+        self._display_dive(data.copy(deep=True))
+        self._display_overview(data.copy(deep=True))
 
   def _display_dive(self, data, update=None):
     sprite_size = 32 if len(data.index) > 50000 else 64
-
+    format_window_info_in_dataframe(data)
     jsonstr = data.to_json(orient='records', default_handler=str)
     if update:
-      script = _DIVE_SCRIPT_TEMPLATE.format(display_id=update, jsonstr=jsonstr)
+      script = _DIVE_SCRIPT_TEMPLATE.format(
+          display_id=update._dive_display_id, jsonstr=jsonstr)
       display_javascript(Javascript(script))
     else:
       html = _DIVE_HTML_TEMPLATE.format(
@@ -342,7 +342,7 @@ class PCollectionVisualization(object):
     protostr = base64.b64encode(proto.SerializeToString()).decode('utf-8')
     if update:
       script = _OVERVIEW_SCRIPT_TEMPLATE.format(
-          display_id=update, protostr=protostr)
+          display_id=update._overview_display_id, protostr=protostr)
       display_javascript(Javascript(script))
     else:
       html = _OVERVIEW_HTML_TEMPLATE.format(
@@ -350,83 +350,39 @@ class PCollectionVisualization(object):
       display(HTML(html))
 
   def _display_dataframe(self, data, update=None):
-
-    def event_time_formatter(event_time_us):
-      options = ie.current_env().options
-      to_tz = options.display_timezone
-      return (datetime.datetime.utcfromtimestamp(event_time_us / 1000000)
-              .replace(tzinfo=tz.tzutc())
-              .astimezone(to_tz)
-              .strftime(options.display_timestamp_format))
-
-    def windows_formatter(windows):
-      result = []
-      for w in windows:
-        if isinstance(w, GlobalWindow):
-          result.append(str(w))
-        elif isinstance(w, IntervalWindow):
-          # First get the duration in terms of hours, minutes, seconds, and
-          # micros.
-          duration = w.end.micros - w.start.micros
-          duration_secs = duration // 1000000
-          hours, remainder = divmod(duration_secs, 3600)
-          minutes, seconds = divmod(remainder, 60)
-          micros = (duration - duration_secs * 1000000) % 1000000
-
-          # Construct the duration string. Try and write the string in such a
-          # way that minimizes the amount of characters written.
-          duration = ''
-          if hours:
-            duration += '{}h '.format(hours)
-
-          if minutes or (hours and seconds):
-            duration += '{}m '.format(minutes)
-
-          if seconds:
-            if micros:
-              duration += '{}.{:06}s'.format(seconds, micros)
-            else:
-              duration += '{}s'.format(seconds)
-
-          options = ie.current_env().options
-          to_tz = options.display_timezone
-          start = event_time_formatter(w.start.micros)
-
-          result.append('{} ({})'.format(start, duration))
-
-      return ','.join(result)
-
-    def pane_info_formatter(pane_info):
-      from apache_beam.utils.windowed_value import PaneInfo
-      from apache_beam.utils.windowed_value import PaneInfoTiming
-      assert isinstance(pane_info, PaneInfo)
-
-      result = 'Pane {}'.format(pane_info.index)
-      timing_info = '{}{}'.format(
-          'Final ' if pane_info.is_last else '',
-          PaneInfoTiming.to_string(pane_info.timing).lower().capitalize()
-          if pane_info.timing in (PaneInfoTiming.EARLY, PaneInfoTiming.LATE)
-          else '')
-
-      if timing_info:
-        result += ': ' + timing_info
-
-      return result
-
-
-    table_id = 'table_{}'.format(update if update else self._df_display_id)
-    html = _DATAFRAME_PAGINATION_TEMPLATE.format(
-        dataframe_html=data.to_html(notebook=True, table_id=table_id,
-        formatters={
-            'event_time': event_time_formatter,
-            'windows': windows_formatter,
-            'pane_info': pane_info_formatter
-        }),
-        table_id=table_id)
-    if update:
-      update_display(HTML(html), display_id=update)
+    table_id = 'table_{}'.format(
+        update._df_display_id if update else self._df_display_id)
+    columns = [{
+        'title': ''
+    }] + [{
+        'title': str(column)
+    } for column in data.columns]
+    format_window_info_in_dataframe(data)
+    rows = data.applymap(lambda x: str(x)).to_dict('split')['data']
+    rows = [{k + 1: v for k, v in enumerate(row)} for row in rows]
+    for k, row in enumerate(rows):
+      row[0] = k
+    script = _DATAFRAME_SCRIPT_TEMPLATE.format(
+        table_id=table_id, columns=columns, data_as_rows=rows)
+    script_in_jquery_with_datatable = ie._JQUERY_WITH_DATATABLE_TEMPLATE.format(
+        customized_script=script)
+    # Dynamically load data into the existing datatable if not empty.
+    if update and not update._is_datatable_empty:
+      display_javascript(Javascript(script_in_jquery_with_datatable))
     else:
-      display(HTML(html), display_id=self._df_display_id)
+      html = _DATAFRAME_PAGINATION_TEMPLATE.format(
+          table_id=table_id,
+          script_in_jquery_with_datatable=script_in_jquery_with_datatable)
+      if update:
+        # Re-initialize a new datatable to replace the existing empty datatable.
+        update_display(HTML(html), display_id=update._df_display_id)
+        if not data.empty:
+          update._is_datatable_empty = False
+      else:
+        # Initialize a datatable for the first time rendering.
+        display(HTML(html), display_id=self._df_display_id)
+        if not data.empty:
+          self._is_datatable_empty = False
 
 
 def _to_element_list(cache_key):
@@ -470,3 +426,81 @@ def _to_element_list(cache_key):
       _LOGGER.debug(sys.exc_info())
 
   return output
+
+
+def format_window_info_in_dataframe(data):
+  if 'event_time' in data.columns:
+    data['event_time'] = data['event_time'].apply(event_time_formatter)
+  if 'windows' in data.columns:
+    data['windows'] = data['windows'].apply(windows_formatter)
+  if 'pane_info' in data.columns:
+    data['pane_info'] = data['pane_info'].apply(pane_info_formatter)
+
+
+def event_time_formatter(event_time_us):
+  options = ie.current_env().options
+  to_tz = options.display_timezone
+  try:
+    return (
+        datetime.datetime.utcfromtimestamp(event_time_us / 1000000).replace(
+            tzinfo=tz.tzutc()).astimezone(to_tz).strftime(
+                options.display_timestamp_format))
+  except ValueError:
+    if event_time_us < 0:
+      return 'Min Timestamp'
+    return 'Max Timestamp'
+
+
+def windows_formatter(windows):
+  result = []
+  for w in windows:
+    if isinstance(w, GlobalWindow):
+      result.append(str(w))
+    elif isinstance(w, IntervalWindow):
+      # First get the duration in terms of hours, minutes, seconds, and
+      # micros.
+      duration = w.end.micros - w.start.micros
+      duration_secs = duration // 1000000
+      hours, remainder = divmod(duration_secs, 3600)
+      minutes, seconds = divmod(remainder, 60)
+      micros = (duration - duration_secs * 1000000) % 1000000
+
+      # Construct the duration string. Try and write the string in such a
+      # way that minimizes the amount of characters written.
+      duration = ''
+      if hours:
+        duration += '{}h '.format(hours)
+
+      if minutes or (hours and seconds):
+        duration += '{}m '.format(minutes)
+
+      if seconds:
+        if micros:
+          duration += '{}.{:06}s'.format(seconds, micros)
+        else:
+          duration += '{}s'.format(seconds)
+
+      options = ie.current_env().options
+      to_tz = options.display_timezone
+      start = event_time_formatter(w.start.micros)
+
+      result.append('{} ({})'.format(start, duration))
+
+  return ','.join(result)
+
+
+def pane_info_formatter(pane_info):
+  from apache_beam.utils.windowed_value import PaneInfo
+  from apache_beam.utils.windowed_value import PaneInfoTiming
+  assert isinstance(pane_info, PaneInfo)
+
+  result = 'Pane {}'.format(pane_info.index)
+  timing_info = '{}{}'.format(
+      'Final ' if pane_info.is_last else '',
+      PaneInfoTiming.to_string(pane_info.timing).lower().capitalize() if
+      pane_info.timing in (PaneInfoTiming.EARLY, PaneInfoTiming.LATE) else '')
+
+  if timing_info:
+    result += ': ' + timing_info
+
+  return result

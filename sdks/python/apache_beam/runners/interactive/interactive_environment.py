@@ -44,6 +44,35 @@ _interactive_beam_env = None
 
 _LOGGER = logging.getLogger(__name__)
 
+# By `format(customized_script=xxx)`, the given `customized_script` is
+# guaranteed to be executed within access to a jquery with datatable plugin
+# configured which is useful so that any `customized_script` is resilient to
+# browser refresh. Inside `customized_script`, use `$` as jQuery.
+_JQUERY_WITH_DATATABLE_TEMPLATE = """
+        if (typeof window.jquery341 == 'undefined'){{
+          var jqueryScript = document.createElement('script');
+          jqueryScript.src = 'https://code.jquery.com/jquery-3.4.1.slim.min.js';
+          jqueryScript.type = 'text/javascript';
+          jqueryScript.onload = function() {{
+            var datatableScript = document.createElement('script');
+            datatableScript.src = 'https://cdn.datatables.net/1.10.20/js/jquery.dataTables.min.js';
+            datatableScript.type = 'text/javascript';
+            datatableScript.onload = function() {{
+              window.jquery341 = jQuery.noConflict(true);
+              window.$ = jquery341;
+              window.jquery341(document).ready(function($){{
+                {customized_script}
+              }});
+            }}
+            document.head.appendChild(datatableScript);
+          }};
+          document.head.appendChild(jqueryScript);
+        }} else {{
+          window.jquery341(document).ready(function($){{
+            {customized_script}
+          }});
+        }}"""
+
 
 def current_env(cache_manager=None):
   """Gets current Interactive Beam environment."""
@@ -140,6 +169,7 @@ class InteractiveEnvironment(object):
           'You have limited Interactive Beam features since your '
           'ipython kernel is not connected any notebook frontend.')
     if self._is_in_notebook:
+      self.load_jquery_with_datatable()
       register_ipython_log_handler()
 
   @property
@@ -362,3 +392,28 @@ class InteractiveEnvironment(object):
   @property
   def computed_pcollections(self):
     return self._computed_pcolls
+
+  def load_jquery_with_datatable(self):
+    """Loads common resources to enable jquery with datatable configured for
+    notebook frontends if necessary. If the resources have been loaded, NOOP.
+
+    A window.jquery341 with datatable plugin configured can be used in following
+    notebook cells once this is invoked.
+
+    #. There should only be one jQuery imported.
+    #. Datatable needs to be imported after jQuery is loaded.
+    #. Imported jQuery is attached to window named as jquery[version] and `$`,
+       where `$` is potentially needed by Bootstrap libs.
+    #. When using jQuery, prefer the window.jquery[version]. Because `$` is a
+       common alias and can be taken over at any time by any library.
+    #. The window attachment needs to happen at the end of import chain until
+       all jQuery plugins are set.
+    """
+    try:
+      from IPython.core.display import Javascript
+      from IPython.core.display import display_javascript
+      display_javascript(
+          Javascript(
+              _JQUERY_WITH_DATATABLE_TEMPLATE.format(customized_script='')))
+    except ImportError:
+      pass  # NOOP if dependencies are not available.
