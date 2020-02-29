@@ -374,9 +374,9 @@ class PCollectionVisualization(object):
           table_id=table_id,
           script_in_jquery_with_datatable=script_in_jquery_with_datatable)
       if update:
-        # Re-initialize a new datatable to replace the existing empty datatable.
-        update_display(HTML(html), display_id=update._df_display_id)
         if not data.empty:
+          # Re-initialize a datatable to replace the existing empty datatable.
+          update_display(HTML(html), display_id=update._df_display_id)
           update._is_datatable_empty = False
       else:
         # Initialize a datatable for the first time rendering.

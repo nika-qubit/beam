@@ -49,7 +49,7 @@ _LOGGER = logging.getLogger(__name__)
 # configured which is useful so that any `customized_script` is resilient to
 # browser refresh. Inside `customized_script`, use `$` as jQuery.
 _JQUERY_WITH_DATATABLE_TEMPLATE = """
-        if (typeof window.jquery341 == 'undefined'){{
+        if (typeof window.jquery341 == 'undefined') {{
           var jqueryScript = document.createElement('script');
           jqueryScript.src = 'https://code.jquery.com/jquery-3.4.1.slim.min.js';
           jqueryScript.type = 'text/javascript';
@@ -59,7 +59,6 @@ _JQUERY_WITH_DATATABLE_TEMPLATE = """
             datatableScript.type = 'text/javascript';
             datatableScript.onload = function() {{
               window.jquery341 = jQuery.noConflict(true);
-              window.$ = jquery341;
               window.jquery341(document).ready(function($){{
                 {customized_script}
               }});
@@ -71,6 +70,27 @@ _JQUERY_WITH_DATATABLE_TEMPLATE = """
           window.jquery341(document).ready(function($){{
             {customized_script}
           }});
+        }}"""
+
+_HTML_IMPORT_TEMPLATE = """
+        var import_html = () => {{
+          {hrefs}.forEach(href => {{
+            var link = document.createElement('link');
+            link.rel = 'import'
+            link.href = href;
+            document.head.appendChild(link);
+          }});
+        }}
+        if ('import' in document.createElement('link')) {{
+          import_html();
+        }} else {{
+          var webcomponentScript = document.createElement('script');
+          webcomponentScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/webcomponentsjs/1.3.3/webcomponents-lite.js';
+          webcomponentScript.type = 'text/javascript';
+          webcomponentScript.onload = function(){{
+            import_html();
+          }};
+          document.head.appendChild(webcomponentScript);
         }}"""
 
 
@@ -170,6 +190,10 @@ class InteractiveEnvironment(object):
           'ipython kernel is not connected any notebook frontend.')
     if self._is_in_notebook:
       self.load_jquery_with_datatable()
+      self.import_html_to_head([
+          'https://raw.githubusercontent.com/PAIR-code/facets/1.0.0/facets-dist'
+          '/facets-jupyter.html'
+      ])
       register_ipython_log_handler()
 
   @property
@@ -402,10 +426,7 @@ class InteractiveEnvironment(object):
 
     #. There should only be one jQuery imported.
     #. Datatable needs to be imported after jQuery is loaded.
-    #. Imported jQuery is attached to window named as jquery[version] and `$`,
-       where `$` is potentially needed by Bootstrap libs.
-    #. When using jQuery, prefer the window.jquery[version]. Because `$` is a
-       common alias and can be taken over at any time by any library.
+    #. Imported jQuery is attached to window named as jquery[version].
     #. The window attachment needs to happen at the end of import chain until
        all jQuery plugins are set.
     """
@@ -415,5 +436,26 @@ class InteractiveEnvironment(object):
       display_javascript(
           Javascript(
               _JQUERY_WITH_DATATABLE_TEMPLATE.format(customized_script='')))
+    except ImportError:
+      pass  # NOOP if dependencies are not available.
+
+  def import_html_to_head(self, html_hrefs):
+    """Imports given external HTMLs (supported through webcomponents) into
+    the head of the document.
+
+    On load of webcomponentsjs, import given HTMLs. If HTML import is already
+    supported, skip loading webcomponentsjs.
+
+    No matter how many times an HTML import occurs in the document, only the
+    first occurrence really embeds the external HTML. In a notebook environment,
+    the body of the document is always changing due to cell [re-]execution,
+    deletion and re-ordering. Thus, HTML imports shouldn't be put in the body
+    especially the output areas of notebook cells.
+    """
+    try:
+      from IPython.core.display import Javascript
+      from IPython.core.display import display_javascript
+      display_javascript(
+          Javascript(_HTML_IMPORT_TEMPLATE.format(hrefs=html_hrefs)))
     except ImportError:
       pass  # NOOP if dependencies are not available.
