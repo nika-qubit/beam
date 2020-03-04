@@ -50,7 +50,8 @@ class TestStreamServiceController(TestStreamServiceServicer):
 
   def stop(self):
     self._server.stop(0)
-    self._server.wait_for_termination()
+    if hasattr(self._server, 'wait_for_termination'):
+      self._server.wait_for_termination()
 
   def Events(self, request, context):
     """Streams back all of the events from the streaming cache."""

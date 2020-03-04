@@ -100,6 +100,7 @@ _OVERVIEW_HTML_TEMPLATE = _CSS + """
               document.querySelector("#{display_id}").protoInput = "{protostr}";
             </script>"""
 _DATATABLE_INITIALIZATION_CONFIG = """
+            bAutoWidth: false,
             columns: {columns},
             destroy: true,
             responsive: true,

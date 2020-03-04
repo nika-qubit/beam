@@ -291,6 +291,25 @@ def show(*pcolls, include_window_info=False, visualize_data=False):
   bcj.attempt_to_run_background_caching_job(
       runner, user_pipeline, user_pipeline.options)
 
+  pcolls = set(pcolls)
+  computed_pcolls = set()
+  for pcoll in pcolls:
+    if pcoll in ie.current_env().computed_pcollections:
+      computed_pcolls.add(pcoll)
+  pcolls = pcolls.difference(computed_pcolls)
+  # If in notebook, static plotting computed pcolls as computation is done.
+  if ie.current_env().is_in_notebook:
+    for pcoll in computed_pcolls:
+      visualize(
+          pcoll,
+          include_window_info=include_window_info,
+          display_facets=visualize_data)
+  elif ie.current_env().is_in_ipython:
+    for pcoll in computed_pcolls:
+      visualize(pcoll, include_window_info=include_window_info)
+
+  if not pcolls:
+    return
   # Build a pipeline fragment for the PCollections and run it.
   result = pf.PipelineFragment(list(pcolls), user_pipeline.options).run()
   ie.current_env().set_pipeline_result(user_pipeline, result)
