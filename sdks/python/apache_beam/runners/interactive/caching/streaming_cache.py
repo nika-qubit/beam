@@ -44,8 +44,12 @@ class StreamingCacheSink(beam.PTransform):
   transforms are writing to the same file. This PTransform is assumed to only
   run correctly with the DirectRunner.
   """
-  def __init__(self, cache_dir, filename, sample_resolution_sec,
-               coder=SafeFastPrimitivesCoder()):
+  def __init__(
+      self,
+      cache_dir,
+      filename,
+      sample_resolution_sec,
+      coder=SafeFastPrimitivesCoder()):
     self._cache_dir = cache_dir
     self._filename = filename
     self._sample_resolution_sec = sample_resolution_sec
@@ -87,8 +91,7 @@ class StreamingCacheSink(beam.PTransform):
         self._fh.close()
 
       def process(self, e):
-        self._fh.write(self._coder.encode(e))
-        self._fh.write(b'\n')
+        self._fh.write(self._coder.encode(e) + b'\n')
 
     return (
         pcoll
@@ -97,9 +100,8 @@ class StreamingCacheSink(beam.PTransform):
             sample_resolution_sec=self._sample_resolution_sec,
             output_format=ReverseTestStream.SERIALIZED,
             coder=self._coder)
-        | beam.ParDo(StreamingWriteToText(
-            full_path=self._path,
-            coder=self._coder)))
+        | beam.ParDo(
+            StreamingWriteToText(full_path=self._path, coder=self._coder)))
 
 
 class StreamingCacheSource:
@@ -108,14 +110,17 @@ class StreamingCacheSource:
   This class is used to read from file and send its to the TestStream via the
   StreamingCacheManager.Reader.
   """
-  def __init__(self, cache_dir, labels, is_cache_complete=None,
-               coder=SafeFastPrimitivesCoder()):
+  def __init__(
+      self,
+      cache_dir,
+      labels,
+      is_cache_complete=None,
+      coder=SafeFastPrimitivesCoder()):
     self._cache_dir = cache_dir
     self._coder = coder
     self._labels = labels
-    self._is_cache_complete = (is_cache_complete
-                               if is_cache_complete
-                               else lambda: True)
+    self._is_cache_complete = (
+        is_cache_complete if is_cache_complete else lambda: True)
 
   def _wait_until_file_exists(self, timeout_secs=30):
     """Blocks until the file exists for a maximum of timeout_secs.
@@ -127,7 +132,7 @@ class StreamingCacheSource:
       now_secs = time.time()
       try:
         path = os.path.join(self._cache_dir, *self._labels)
-        f = open(path, mode='r')
+        f = open(path, mode='rb')
       except EnvironmentError as e:
         # For Python2 and Python3 compatibility, this checks the
         # EnvironmentError to see if the file exists.
@@ -170,13 +175,14 @@ class StreamingCacheSource:
       else:
         # The first line at pos = 0 is always the header. Read the line without
         # the new line.
+        to_decode = line[:-1]
         if pos == 0:
           header = TestStreamFileHeader()
-          header.ParseFromString(self._coder.decode(line[:-1]))
+          header.ParseFromString(self._coder.decode(to_decode))
           yield header
         else:
           record = TestStreamFileRecord()
-          record.ParseFromString(self._coder.decode(line[:-1]))
+          record.ParseFromString(self._coder.decode(to_decode))
           yield record
 
   def read(self, tail):
@@ -194,8 +200,8 @@ class StreamingCacheSource:
 class StreamingCache(CacheManager):
   """Abstraction that holds the logic for reading and writing to cache.
   """
-  def __init__(self, cache_dir, is_cache_complete=None,
-               sample_resolution_sec=0.1):
+  def __init__(
+      self, cache_dir, is_cache_complete=None, sample_resolution_sec=0.1):
     self._sample_resolution_sec = sample_resolution_sec
     self._is_cache_complete = is_cache_complete
 
@@ -257,9 +263,11 @@ class StreamingCache(CacheManager):
     pipeline runtime which needs to block.
     """
     readers = [
-        StreamingCacheSource(self._cache_dir, l,
-                             is_cache_complete=self._is_cache_complete)
-        .read(tail=True) for l in labels]
+        StreamingCacheSource(
+            self._cache_dir, l,
+            is_cache_complete=self._is_cache_complete).read(tail=True)
+        for l in labels
+    ]
     headers = [next(r) for r in readers]
     return StreamingCache.Reader(headers, readers).read()
 
@@ -302,8 +310,9 @@ class StreamingCache(CacheManager):
     self._saved_pcoders[os.path.join(*labels)] = pcoder
 
   def load_pcoder(self, *labels):
-    return (self._default_pcoder if self._default_pcoder is not None else
-            self._saved_pcoders[os.path.join(*labels)])
+    return (
+        self._default_pcoder if self._default_pcoder is not None else
+        self._saved_pcoders[os.path.join(*labels)])
 
   def cleanup(self):
     if os.path.exists(self._cache_dir):
@@ -331,8 +340,8 @@ class StreamingCache(CacheManager):
       # The file headers that are metadata for that particular PCollection.
       # The header allows for metadata about an entire stream, so that the data
       # isn't copied per record.
-      self._headers = {header.tag : header for header in headers}
-      self._readers = {h.tag : r for (h, r) in zip(headers, readers)}
+      self._headers = {header.tag: header for header in headers}
+      self._readers = {h.tag: r for (h, r) in zip(headers, readers)}
 
       # The watermarks per tag. Useful for introspection in the stream.
       self._watermarks = {tag: timestamp.MIN_TIMESTAMP for tag in self._headers}
@@ -361,6 +370,8 @@ class StreamingCache(CacheManager):
           continue
         try:
           record = next(r)
+          record.processing_time.nanos = 1000 * (
+              record.processing_time.nanos // 1000)
           records.append((tag, record))
           self._stream_times[tag] = Timestamp.from_proto(record.processing_time)
         except StopIteration:
