@@ -211,7 +211,7 @@ GCP_REQUIREMENTS = [
 
 INTERACTIVE_BEAM = [
     'facets-overview>=1.0.0,<2',
-    'ipython>=5.8.0,<6',
+    'ipython>=5.8.0,<8',
     # jsons is supported by Python 3.5.3+.
     'jsons>=1.0.0,<2; python_version >= "3.5.3"',
     'timeloop>=1.0.2,<2',
