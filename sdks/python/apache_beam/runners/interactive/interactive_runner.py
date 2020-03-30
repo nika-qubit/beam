@@ -246,6 +246,9 @@ class PipelineResult(beam.runners.runner.PipelineResult):
   def state(self):
     return self._underlying_result.state
 
+  def metrics(self):
+    return self._underlying_result.metrics()
+
   def wait_until_finish(self):
     self._underlying_result.wait_until_finish()
 

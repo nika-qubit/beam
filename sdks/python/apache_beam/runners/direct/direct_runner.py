@@ -121,9 +121,14 @@ class SwitchingDirectRunner(PipelineRunner):
     except ImportError:
       use_fnapi_runner = False
 
+    def func(progress_result):
+      import logging
+      dummy = logging.getLogger('apache_beam.runners.interactive')
+      dummy.info('progress_result:%s', progress_result)
+
     if use_fnapi_runner:
       from apache_beam.runners.portability.fn_api_runner import FnApiRunner
-      runner = FnApiRunner()
+      runner = FnApiRunner(progress_request_frequency=1)
     else:
       runner = BundleBasedDirectRunner()
 

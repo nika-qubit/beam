@@ -42,6 +42,7 @@ from apache_beam.transforms.window import GlobalWindow
 from apache_beam.transforms.window import IntervalWindow
 
 try:
+  import ipywidgets as widgets
   from IPython import get_ipython  # pylint: disable=import-error
   from IPython.core.display import HTML  # pylint: disable=import-error
   from IPython.core.display import Javascript  # pylint: disable=import-error
@@ -285,6 +286,9 @@ class PCollectionVisualization(object):
     (the uniqueness is guaranteed throughout the lifespan of the PCollection
     variable).
     """
+    pipeline_result = ie.current_env().pipeline_result(self._pcoll.pipeline)
+    # _LOGGER.info('%s', vars(pipeline_result.metrics()))
+    #_LOGGER.info('%s', pipeline_result.metrics().query())
     # Ensures that dive, overview and table render the same data because the
     # materialized PCollection data might being updated continuously.
     data = self._to_dataframe()

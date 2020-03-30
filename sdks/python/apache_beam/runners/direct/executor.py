@@ -608,6 +608,11 @@ class _ExecutorServiceParallelExecutor(object):
 
     def call(self, state_sampler):
       try:
+        import logging
+        dummy = logging.getLogger('apache_beam.runners.interactive')
+        dummy.info('pending bundles:%s',
+                   sum([len(val) for _, val in
+                    self._executor.node_to_pending_bundles.items()]))
         update = self._executor.all_updates.poll()
         while update:
           if update.committed_bundle:

@@ -220,6 +220,7 @@ GCP_REQUIREMENTS = [
 INTERACTIVE_BEAM = [
     'facets-overview>=1.0.0,<2',
     'ipython>=5.8.0,<8',
+    'ipywidgets>=7.5.1,<8',
     'timeloop>=1.0.2,<2',
 ]
 AWS_REQUIREMENTS = [

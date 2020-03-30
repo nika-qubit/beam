@@ -1176,6 +1176,9 @@ class ProgressRequester(threading.Thread):
   def __exit__(self, *unused_exc_info):
     if self._frequency:
       self.stop()
+      import logging
+      dummy = logging.getLogger('apache_beam.runners.interactive')
+      dummy.info('bundle processed: %s', vars(self))
 
   def run(self):
     while not self._done:
