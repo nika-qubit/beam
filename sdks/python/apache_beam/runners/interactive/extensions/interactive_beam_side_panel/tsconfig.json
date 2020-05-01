@@ -18,7 +18,16 @@
     "strict": true,
     "strictNullChecks": false,
     "target": "es2017",
-    "types": []
+    "types": [
+      "jest"
+    ]
   },
-  "include": ["src/*"]
+  "include": [
+    "src/*",
+    "src/common/*",
+    "src/d3/*",
+    "src/inspector/*",
+    "src/kernel/*",
+    "src/__tests__/**/*"
+  ]
 }

@@ -4,15 +4,19 @@ Setup Module to setup Python Handlers for the interactive_beam_side_panel extens
 import os
 
 from jupyter_packaging import (
-    create_cmdclass, install_npm, ensure_targets,
-    combine_commands, ensure_python, get_version,
+    create_cmdclass,
+    install_npm,
+    ensure_targets,
+    combine_commands,
+    ensure_python,
+    get_version,
 )
 import setuptools
 
 HERE = os.path.abspath(os.path.dirname(__file__))
 
 # The name of the project
-name="interactive_beam_side_panel"
+name = "interactive_beam_side_panel"
 
 # Ensure a valid python version
 ensure_python(">=3.5")
@@ -27,22 +31,20 @@ jstargets = [
     os.path.join(HERE, "lib", "interactivebeamsidepanel.js"),
 ]
 
-package_data_spec = {
-    name: [
-        "*"
-    ]
-}
+package_data_spec = {name: ["*"]}
 
 data_files_spec = [
     ("share/jupyter/lab/extensions", lab_path, "*.tgz"),
-    ("etc/jupyter/jupyter_notebook_config.d",
-     "jupyter-config", "interactive_beam_side_panel.json"),
+    (
+        "etc/jupyter/jupyter_notebook_config.d",
+        "jupyter-config",
+        "interactive_beam_side_panel.json"),
 ]
 
-cmdclass = create_cmdclass("jsdeps", 
+cmdclass = create_cmdclass(
+    "jsdeps",
     package_data_spec=package_data_spec,
-    data_files_spec=data_files_spec
-)
+    data_files_spec=data_files_spec)
 
 cmdclass["jsdeps"] = combine_commands(
     install_npm(HERE, build_cmd="build:all", npm=["jlpm"]),
@@ -50,17 +52,18 @@ cmdclass["jsdeps"] = combine_commands(
 )
 
 with open("README.md", "r") as fh:
-    long_description = fh.read()
+  long_description = fh.read()
 
 setup_args = dict(
     name=name,
     version=version,
     url="https://github.com/my_name/myextension",
     author="ningk",
-    description="A side panel providing information of current interactive environment, data sets associated with PCollections, pipeline state, job status and source capture.",
-    long_description= long_description,
+    description=
+    "A side panel providing information of current interactive environment, data sets associated with PCollections, pipeline state, job status and source capture.",
+    long_description=long_description,
     long_description_content_type="text/markdown",
-    cmdclass= cmdclass,
+    cmdclass=cmdclass,
     packages=setuptools.find_packages(),
     install_requires=[
         "jupyterlab~=2.0",
@@ -82,6 +85,5 @@ setup_args = dict(
     ],
 )
 
-
 if __name__ == "__main__":
-    setuptools.setup(**setup_args)
+  setuptools.setup(**setup_args)
