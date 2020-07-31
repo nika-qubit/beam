@@ -15,7 +15,7 @@ export type IOptions = IShowOptions;
 
 export class InspectableViewModel implements IHtmlProvider {
   constructor(sessionContext: ISessionContext) {
-    this._model = new KernelModel(sessionContext);
+    this._model = new KernelModel(sessionContext, true);
   }
 
   buildQueryKernelSideRenderingShowGraph() {
@@ -43,6 +43,10 @@ export class InspectableViewModel implements IHtmlProvider {
       optionsAsString +
       ')'
     );
+  }
+
+  get kernelModel(): KernelModel {
+    return this._model;
   }
 
   queryKernel(

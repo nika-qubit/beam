@@ -48,6 +48,15 @@ export class KernelModel {
     value.onIOPub = this._onIOPub;
   }
 
+  interruptKernel(): void {
+    this._sessionContext.session?.kernel?.interrupt();
+  }
+
+
+  get isDone(): boolean {
+    return this._isDone;
+  }
+
   get executeResult(): object {
     if (this._executeResult) {
       const dataInPlainText = this._executeResult.data['text/plain'] as string;
@@ -98,6 +107,7 @@ export class KernelModel {
       silent: !expectReply,
       store_history: false,
     });
+    this._isDone = false
   }
 
   private _onIOPub = (msg: KernelMessage.IIOPubMessage): void => {
@@ -110,16 +120,22 @@ export class KernelModel {
         const executeResult = msg.content as IExecuteResult;
         this._executeResult = executeResult;
         this._stateChanged.emit();
+        this._isDone = true;
         break;
       case 'display_data':
         const displayData = msg.content as IDisplayData;
         this._displayData.push(displayData);
         this._stateChanged.emit();
+        this._isDone = false;
         break;
       case 'update_display_data':
         const displayUpdate = msg.content as IDisplayUpdate;
         this._displayUpdate.push(displayUpdate);
         this._stateChanged.emit();
+        this._isDone = false;
+        break;
+      case 'status':
+        this._isDone = true;
         break;
       default:
         break;
@@ -137,4 +153,5 @@ export class KernelModel {
   private _sessionContext: ISessionContext;
   private _stateChanged = new Signal<KernelModel, void>(this);
   private _enableConsoleLog = false;
+  private _isDone = false;
 }

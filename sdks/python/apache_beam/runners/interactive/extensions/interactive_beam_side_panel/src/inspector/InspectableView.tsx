@@ -15,8 +15,9 @@ import { typedKeys } from '../common/Objects';
 import { D3View } from '../d3/D3View';
 
 import { Checkbox } from '@rmwc/checkbox';
-
 import '@rmwc/checkbox/styles';
+
+import { InterruptKernelButton } from '../kernel/KernelAction';
 
 type IViewOptions = D3Options;
 
@@ -115,7 +116,11 @@ export class InspectableView extends React.Component<
           />
         );
       });
-      return <React.Fragment>{viewOptions}</React.Fragment>;
+      return (
+        <React.Fragment>
+          {viewOptions}
+        </React.Fragment>
+      );
     }
   }
 
@@ -129,6 +134,7 @@ export class InspectableView extends React.Component<
           {options}
           {viewOptions}
         </div>
+        <InterruptKernelButton model={this.props.model.kernelModel}/>
         <HtmlView htmlProvider={htmlProvider} />
         <D3View model={this.props.d3Model} />
       </div>
