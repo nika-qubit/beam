@@ -106,7 +106,9 @@ class ElementStream:
     # Import limiters here to prevent a circular import.
     from apache_beam.runners.interactive.options.capture_limiters import CountLimiter
     from apache_beam.runners.interactive.options.capture_limiters import ProcessingTimeLimiter
-    reader, _ = cache_manager.read('full', self._cache_key, tail=tail)
+    reader, version = cache_manager.read('full', self._cache_key, tail=tail)
+    
+    print(self._cache_key)
 
     # Because a single TestStreamFileRecord can yield multiple elements, we
     # limit the count again here in the to_element_list call.

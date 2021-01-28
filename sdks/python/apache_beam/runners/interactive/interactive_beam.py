@@ -572,10 +572,14 @@ def collect(pcoll, n='inf', duration='inf', include_window_info=False):
   recording_manager = ie.current_env().get_recording_manager(
       user_pipeline, create_if_absent=True)
 
+  import time
+  print(time.time())
   recording = recording_manager.record([pcoll], max_n=n, max_duration=duration)
+  print(time.time())
 
   try:
     elements = list(recording.stream(pcoll).read())
+    print(elements)
   except KeyboardInterrupt:
     recording.cancel()
     return pd.DataFrame()
