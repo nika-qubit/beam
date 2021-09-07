@@ -1276,3 +1276,22 @@ class SimpleMapTaskExecutor(object):
       op.start()
     for op in self._ops:
       op.finish()
+
+
+class TestStreamOperation(Operation):
+  def __init__(
+      self,
+      name_context,  #type: Union[str, common.NameContext]
+      counter_factory,
+      state_sampler,  #type: StateSampler
+
+      output_tags  #type: Optional[Iterable[str]]
+  ):
+    super().__init__(name_context, None, counter_factory, state_sampler)
+    self._output_tags = output_tags if output_tags else ['None']
+
+  def setup(self):
+    pass
+
+  def process(self, e: WindowedValue) -> None:
+    print(e)

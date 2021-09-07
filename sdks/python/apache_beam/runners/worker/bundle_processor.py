@@ -105,6 +105,7 @@ FnApiUserRuntimeStateTypes = Union['ReadModifyWriteRuntimeState',
 DATA_INPUT_URN = 'beam:runner:source:v1'
 DATA_OUTPUT_URN = 'beam:runner:sink:v1'
 IDENTITY_DOFN_URN = 'beam:dofn:identity:0.1'
+TEST_STREAM_URN = 'beam:transform:teststream:v1'
 # TODO(vikasrk): Fix this once runner sends appropriate common_urns.
 OLD_DATAFLOW_RUNNER_HARNESS_PARDO_URN = 'beam:dofn:javasdk:0.1'
 OLD_DATAFLOW_RUNNER_HARNESS_READ_URN = 'beam:source:java:0.1'
@@ -207,6 +208,7 @@ class DataInputOperation(RunnerIOOperation):
 
   def process(self, windowed_value):
     # type: (windowed_value.WindowedValue) -> None
+    print(windowed_value)
     self.output(windowed_value)
 
   def process_encoded(self, encoded_windowed_values):
@@ -1194,6 +1196,8 @@ class BeamTransformFactory(object):
       _LOGGER.debug("No unique name set for transform %s" % transform_id)
       transform_proto.unique_name = transform_id
     creator, parameter_type = self._known_urns[transform_proto.spec.urn]
+    print(transform_proto)
+    print(parameter_type)
     payload = proto_utils.parse_Bytes(
         transform_proto.spec.payload, parameter_type)
     return creator(self, transform_id, transform_proto, payload, consumers)
@@ -1295,7 +1299,7 @@ def create_source_runner(
     consumers  # type: Dict[str, List[operations.Operation]]
 ):
   # type: (...) -> DataInputOperation
-
+  print(grpc_port)
   output_coder = factory.get_coder(grpc_port.coder_id)
   return DataInputOperation(
       common.NameContext(transform_proto.unique_name, transform_id),
@@ -1306,6 +1310,34 @@ def create_source_runner(
       output_coder,
       transform_id=transform_id,
       data_channel=factory.data_channel_factory.create_data_channel(grpc_port))
+
+
+@BeamTransformFactory.register_urn(
+    TEST_STREAM_URN, beam_runner_api_pb2.TestStreamPayload)
+def create_test_stream_runner(
+    factory: BeamTransformFactory,
+    transform_id: str,
+    transform_proto: beam_runner_api_pb2.PTransform,
+    payload: beam_runner_api_pb2.TestStreamPayload,
+    consumers: Dict[str, List[operations.Operation]]
+) -> DataInputOperation:
+  if payload.endpoint:
+    output_coder = factory.get_coder(payload.coder_id)
+    grpc_port = beam_fn_api_pb2.RemoteGrpcPort(
+        api_service_descriptor=payload.endpoint, coder_id=payload.coder_id)
+    print(payload)
+    print(consumers)
+    print(grpc_port)
+    return DataInputOperation(
+      common.NameContext(transform_proto.unique_name, transform_id),
+      transform_proto.unique_name,
+      consumers,
+      factory.counter_factory,
+      factory.state_sampler,
+      output_coder,
+      transform_id=transform_id,
+      data_channel=factory.data_channel_factory.create_data_channel(grpc_port))
+  raise NotImplementedError('TestStream with in memory payload is not supported.')
 
 
 @BeamTransformFactory.register_urn(

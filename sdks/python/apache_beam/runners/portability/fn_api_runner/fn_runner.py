@@ -201,6 +201,8 @@ class FnApiRunner(runner.PipelineRunner):
     self._validate_requirements(pipeline_proto)
     self._check_requirements(pipeline_proto)
     stage_context, stages = self.create_stages(pipeline_proto)
+    print(stage_context)
+    print(stages)
     # TODO(pabloem, BEAM-7514): Create a watermark manager (that has access to
     #   the teststream (if any), and all the stages).
     return self.run_stages(stage_context, stages)
@@ -300,9 +302,9 @@ class FnApiRunner(runner.PipelineRunner):
         raise ValueError(
             'Unable to run pipeline with requirement: %s' % requirement)
     for transform in pipeline_proto.components.transforms.values():
-      if transform.spec.urn == common_urns.primitives.TEST_STREAM.urn:
-        raise NotImplementedError(transform.spec.urn)
-      elif transform.spec.urn in translations.PAR_DO_URNS:
+      #if transform.spec.urn == common_urns.primitives.TEST_STREAM.urn:
+      #  raise NotImplementedError(transform.spec.urn)
+      if transform.spec.urn in translations.PAR_DO_URNS:
         payload = proto_utils.parse_Bytes(
             transform.spec.payload, beam_runner_api_pb2.ParDoPayload)
         for timer in payload.timer_family_specs.values():

@@ -841,9 +841,11 @@ class BundleContextManager(object):
     expected_timer_output = {}  # type: OutputTimers
     for transform in self.stage.transforms:
       if transform.spec.urn in (bundle_processor.DATA_INPUT_URN,
-                                bundle_processor.DATA_OUTPUT_URN):
+                                bundle_processor.DATA_OUTPUT_URN,
+                                bundle_processor.TEST_STREAM_URN):
         pcoll_id = transform.spec.payload
-        if transform.spec.urn == bundle_processor.DATA_INPUT_URN:
+        if transform.spec.urn in (bundle_processor.DATA_INPUT_URN,
+                                  bundle_processor.TEST_STREAM_URN):
           coder_id = self.execution_context.data_channel_coders[only_element(
               transform.outputs.values())]
           coder = self.execution_context.pipeline_context.coders[

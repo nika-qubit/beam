@@ -89,7 +89,8 @@ class SwitchingDirectRunner(PipelineRunner):
         transform = applied_ptransform.transform
         # The FnApiRunner does not support streaming execution.
         if isinstance(transform, TestStream):
-          self.supported_by_fnapi_runner = False
+          self.has_test_stream = True
+        #  self.supported_by_fnapi_runner = False
         # The FnApiRunner does not support reads from NativeSources.
         if (isinstance(transform, beam.io.Read) and
             isinstance(transform.source, NativeSource)):
