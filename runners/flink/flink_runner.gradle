@@ -128,6 +128,10 @@ configurations {
 }
 
 dependencies {
+  implementation group: 'com.fasterxml.jackson.module', name: 'jackson-module-jaxb-annotations', version: '2.12.3'
+}
+
+dependencies {
   compileOnly project(":sdks:java:build-tools")
   implementation library.java.vendored_guava_26_0_jre
   implementation project(path: ":sdks:java:core", configuration: "shadow")
