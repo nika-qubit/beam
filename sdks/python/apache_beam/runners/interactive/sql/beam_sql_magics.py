@@ -39,9 +39,10 @@ from apache_beam.runners.interactive.caching.cacheable import CacheKey
 from apache_beam.runners.interactive.caching.reify import reify_to_cache
 from apache_beam.runners.interactive.caching.reify import unreify_from_cache
 from apache_beam.runners.interactive.display.pcoll_visualization import visualize_computed_pcoll
+from apache_beam.runners.interactive.sql.run_on_dataflow import run_on_dataflow_runner
+from apache_beam.runners.interactive.sql.run_on_direct import run_on_direct_runner
 from apache_beam.runners.interactive.sql.sql_chain import SqlChain
 from apache_beam.runners.interactive.sql.sql_chain import SqlNode
-from apache_beam.runners.interactive.sql.utils import DataflowOptionsForm
 from apache_beam.runners.interactive.sql.utils import find_pcolls
 from apache_beam.runners.interactive.sql.utils import pformat_namedtuple
 from apache_beam.runners.interactive.sql.utils import register_coder_for_schema
@@ -223,29 +224,16 @@ class BeamSqlMagics(Magics):
         schemas.add(pcoll.element_type)
 
     if runner in ('DirectRunner', None):
-      collect_data_for_local_run(query, found)
-      output_name, output, chain = apply_sql(query, output_name, found)
-      chain.current.schemas = schemas
-      cache_output(output_name, output)
-      return output
+      return run_on_direct_runner(query, output_name, found, schemas)
 
-    output_name, current_node, chain = apply_sql(
-        query, output_name, found, False)
-    current_node.schemas = schemas
-    # TODO(BEAM-10708): Move the options setup and result handling to a
-    # separate module when more runners are supported.
     if runner == 'DataflowRunner':
-      _ = chain.to_pipeline()
-      _ = DataflowOptionsForm(
-          output_name, pcoll_by_name()[output_name],
-          verbose).display_for_input()
-      return None
+      return run_on_dataflow_runner(query, output_name, found, schemas)
     else:
       raise ValueError('Unsupported runner %s.', runner)
 
 
 @progress_indicated
-def collect_data_for_local_run(query: str, found: Dict[str, beam.PCollection]):
+def collect_data_for_interactive_run(query: str, found: Dict[str, beam.PCollection]):
   from apache_beam.runners.interactive import interactive_beam as ib
   for name, pcoll in found.items():
     try:
