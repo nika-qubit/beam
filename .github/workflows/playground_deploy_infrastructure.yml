@@ -23,7 +23,7 @@ jobs:
       PROJECT_ENV: beta
     steps:
       - name: git clone repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Setup GCP account
         run: |
              echo "${{ secrets.GCP_PLAYGROUND_SA_KEY }}" | base64 -d > /tmp/gcp_access.json
