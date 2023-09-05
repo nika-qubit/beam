@@ -40,7 +40,7 @@ jobs:
       DATASTORE_EMULATOR_HOST: 127.0.0.1:8888
     steps:
       - name: Check out the repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Set up Java
         uses: actions/setup-java@v3.8.0
         with:
