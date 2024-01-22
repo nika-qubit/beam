@@ -33,7 +33,7 @@ jobs:
       - name: Check out the repo
         uses: actions/checkout@v3
 
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '${{ env.PYTHON_VERSION }}'
       - uses: actions/setup-java@v3.8.0
