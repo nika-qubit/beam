@@ -38,14 +38,14 @@ require (
 	github.com/aws/smithy-go v1.13.5
 	github.com/docker/go-connections v0.4.0
 	github.com/dustin/go-humanize v1.0.1
-	github.com/go-sql-driver/mysql v1.7.0
+	github.com/go-sql-driver/mysql v1.7.1
 	github.com/golang/protobuf v1.5.3 // TODO(danoliveira): Fully replace this with google.golang.org/protobuf
 	github.com/google/go-cmp v0.5.9
 	github.com/google/uuid v1.3.0
 	github.com/johannesboyne/gofakes3 v0.0.0-20221110173912-32fb85c5aed6
-	github.com/lib/pq v1.10.7
+	github.com/lib/pq v1.10.9
 	github.com/linkedin/goavro v2.1.0+incompatible
-	github.com/proullon/ramsql v0.0.0-20211120092837-c8d0a408b939
+	github.com/proullon/ramsql v0.1.4
 	github.com/spf13/cobra v1.7.0
 	github.com/testcontainers/testcontainers-go v0.19.0
 	github.com/tetratelabs/wazero v1.0.2
@@ -68,7 +68,7 @@ require (
 
 require (
 	github.com/fsouza/fake-gcs-server v1.44.2
-	golang.org/x/exp v0.0.0-20230321023759-10a507213a29
+	golang.org/x/exp v0.0.0-20230713183714-613f0c0eb8a1
 )
 
 require (
@@ -152,8 +152,8 @@ require (
 	github.com/youmark/pkcs8 v0.0.0-20181117223130-1be2e3e5546d // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.opencensus.io v0.24.0 // indirect
-	golang.org/x/crypto v0.1.0 // indirect
-	golang.org/x/mod v0.8.0 // indirect
+	golang.org/x/crypto v0.8.0 // indirect
+	golang.org/x/mod v0.11.0 // indirect
 	golang.org/x/tools v0.6.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
