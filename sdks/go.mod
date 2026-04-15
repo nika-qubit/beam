@@ -20,7 +20,7 @@
 // directory.
 module github.com/apache/beam/sdks/v2
 
-go 1.19
+go 1.21
 
 require (
 	cloud.google.com/go/bigquery v1.51.0
@@ -43,7 +43,7 @@ require (
 	github.com/google/go-cmp v0.5.9
 	github.com/google/uuid v1.3.0
 	github.com/johannesboyne/gofakes3 v0.0.0-20221110173912-32fb85c5aed6
-	github.com/lib/pq v1.10.7
+	github.com/lib/pq v1.12.3
 	github.com/linkedin/goavro v2.1.0+incompatible
 	github.com/proullon/ramsql v0.0.0-20211120092837-c8d0a408b939
 	github.com/spf13/cobra v1.7.0
